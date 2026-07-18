@@ -88,6 +88,10 @@ nonce cannot trigger the window. Completed commands and raw-terminal actions nev
 connection prompts, and ordinary non-elevation output never authorizes sudo. See
 [ADR 015](adr/015-windows-openssh-askpass-boundary.md).
 
+Relay closure is also a lifecycle boundary. A connection that ends while DirectAuth is waiting
+cancels the active challenge, terminates the visible helper, closes both pipe layers and must join
+the relay thread before worker startup can finish failing.
+
 ## Current verification
 
 Unit tests cover every state transition, adversarial prompt spoofing, prompt classification,

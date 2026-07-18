@@ -27,12 +27,15 @@ class FixtureAuthenticationCoordinator:
         self.events.append(event.kind)
         sink.submit(bytearray(response, encoding="utf-8"))
 
+    def cancel_active(self) -> None:
+        return
+
 
 def _target_from_arguments(arguments: Sequence[str]) -> AuthTargetContext:
     try:
         port = int(arguments[arguments.index("-p") + 1])
         user = arguments[arguments.index("-l") + 1]
-        host = arguments[arguments.index("bash") - 1]
+        host = arguments[arguments.index("--") + 1]
     except (ValueError, IndexError) as error:
         raise ValueError("product spike requires direct OpenSSH arguments") from error
     return AuthTargetContext(

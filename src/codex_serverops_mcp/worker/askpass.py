@@ -115,13 +115,22 @@ class OpenSshAskpassRelay:
 
     def close(self) -> None:
         self._stop.set()
+        self.authenticator.cancel_active()
         with suppress(IpcError):
             connect_named_pipe(self.pipe, timeout=0.5).close()
         thread = self._thread
         if thread is not None:
-            thread.join(timeout=2)
-        self.listener.close()
-        self.token = ""
+            thread.join(timeout=5)
+        try:
+            self.listener.close()
+        finally:
+            self.token = ""
+        if thread is not None and thread.is_alive():
+            error = AuthenticationProtocolError(
+                "Askpass relay did not stop after authentication cancellation"
+            )
+            self._set_failure(error)
+            raise error
 
     def _serve(self) -> None:
         while not self._stop.is_set() and time.monotonic() < self._deadline:

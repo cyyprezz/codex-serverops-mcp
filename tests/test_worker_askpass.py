@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import threading
 import time
 import unittest
 
@@ -32,6 +33,25 @@ class FixedCoordinator:
         if self.failure is not None:
             raise self.failure
         sink.submit(bytearray(self.response))
+
+    def cancel_active(self) -> None:
+        return
+
+
+class BlockingCoordinator:
+    def __init__(self) -> None:
+        self.entered = threading.Event()
+        self.cancelled = threading.Event()
+
+    def respond(self, event, sink) -> None:
+        del event, sink
+        self.entered.set()
+        if not self.cancelled.wait(10):
+            raise AuthenticationTimedOut("blocking coordinator was not cancelled")
+        raise AuthenticationCancelled("authentication was cancelled with the relay")
+
+    def cancel_active(self) -> None:
+        self.cancelled.set()
 
 
 def alias_profile() -> ServerProfile:
@@ -173,6 +193,33 @@ class AskpassRelayTests(unittest.TestCase):
                     self._wait_for_failure(relay, type(failure))
                 finally:
                     relay.close()
+
+    def test_close_cancels_an_active_prompt_and_joins_the_relay_thread(self) -> None:
+        coordinator = BlockingCoordinator()
+        relay = self._relay(
+            direct_profile(Authentication.INTERACTIVE_PASSWORD), coordinator
+        )
+        relay.start()
+        environment = dict(os.environ)
+        environment.update(relay.environment)
+        helper = subprocess.Popen(
+            [relay.environment["SSH_ASKPASS"], "deploy@example.test's password:"],
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        self.assertTrue(coordinator.entered.wait(5))
+
+        relay.close()
+        _stdout, _stderr = helper.communicate(timeout=5)
+
+        self.assertTrue(coordinator.cancelled.is_set())
+        self.assertIsNotNone(relay._thread)
+        assert relay._thread is not None
+        self.assertFalse(relay._thread.is_alive())
+        self.assertEqual(relay.token, "")
+        self.assertNotEqual(helper.returncode, 0)
 
 
 if __name__ == "__main__":

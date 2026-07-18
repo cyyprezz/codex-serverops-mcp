@@ -91,6 +91,8 @@ non-elevation output never authorizes sudo.
   Askpass provenance merely by matching a prompt pattern.
 - Connection cancellation, rejection, timeout, mismatch or ambiguity terminates the owning SSH
   startup rather than leaving a hidden prompt.
+- Premature OpenSSH exit cancels any active DirectAuth challenge, terminates the visible process,
+  closes its accepted pipes and requires the worker relay thread to stop before cleanup returns.
 - The visible UI and its existing DirectAuth protocol remain unchanged; one executable has two
   strictly selected local roles.
 - Windows OpenSSH behavior is now a release compatibility requirement. The committed probe is the

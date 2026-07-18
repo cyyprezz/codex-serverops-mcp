@@ -39,6 +39,10 @@ environment; they are not credentials. The helper removes its inherited copies i
 the capability becomes unusable when the relay closes. Invalid handshakes, malformed requests,
 timeouts and ambiguous connection state fail closed.
 
+If OpenSSH ends while a visible connection prompt is still open, relay shutdown cancels the
+active DirectAuth challenge, terminates its UI process, closes the accepted pipes and verifies
+that the relay thread has ended. The window cannot remain detached until its normal timeout.
+
 For every visible DirectAuth request the worker separately creates a fresh request ID, token and
 one-use SID-only pipe. The UI receives only the bounded prompt and non-secret target context. Its
 response goes directly to the worker; the broker cannot observe it.
