@@ -8,6 +8,7 @@ from .framing import ANSI_ESCAPE
 
 READY_PROMPT = re.compile(r"(?:^|\n)bash-[0-9.]+[$#] ?")
 HOST_KEY_PROMPT = re.compile(r"Are you sure you want to continue connecting.*?\?", re.I)
+HOST_KEY_NOTICE_START = re.compile(r"(?:^|\n)The authenticity of host ", re.I)
 KEY_PASSPHRASE_PROMPT = re.compile(r"Enter passphrase for key .*?:", re.I)
 SUDO_PROMPT = re.compile(r"\[sudo\] password for .*?:", re.I)
 SUDO_PROMPT_TEXT = "[sudo] password for %u:"
@@ -64,12 +65,15 @@ class PromptDetector:
                 absolute_end = self._base_offset + match.end()
                 if absolute_end <= self._seen_offsets.get(kind, 0):
                     continue
+                prompt = match.group(0).strip()
+                if kind is PromptKind.HOST_KEY:
+                    prompt = self._host_key_notice(match.start(), match.end())
                 candidates.append(
                     (
                         self._base_offset + match.start(),
                         absolute_end,
                         kind,
-                        match.group(0).strip(),
+                        prompt,
                     )
                 )
 
@@ -78,5 +82,14 @@ class PromptDetector:
             if absolute_end <= self._seen_offsets.get(kind, 0):
                 continue
             self._seen_offsets[kind] = absolute_end
-            events.append(PromptEvent(kind=kind, prompt=prompt[-500:]))
+            limit = 2_048 if kind is PromptKind.HOST_KEY else 500
+            events.append(PromptEvent(kind=kind, prompt=prompt[-limit:]))
         return events
+
+    def _host_key_notice(self, question_start: int, question_end: int) -> str:
+        search_start = max(0, question_start - 2_048)
+        starts = tuple(
+            HOST_KEY_NOTICE_START.finditer(self._history, search_start, question_start)
+        )
+        start = starts[-1].start() if starts else question_start
+        return self._history[start:question_end].strip()

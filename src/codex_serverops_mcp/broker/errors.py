@@ -25,6 +25,12 @@ class BrokerRemoteError(BrokerRequestError):
         self.code = remote_code
 
 
+class BrokerOutcomeUnknown(BrokerRequestError):
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
 class WorkerOperationError(BrokerRequestError):
     def __init__(self, remote_code: str, message: str, state: str | None = None) -> None:
         super().__init__(message)

@@ -240,6 +240,25 @@ class ApplicationServicesTests(unittest.TestCase):
         self.assertEqual(event["action"], "exec")
         self.assertNotIn("abcdefghijklmnop", repr(event))
 
+    def test_terminal_start_audits_command_but_terminal_write_does_not(self) -> None:
+        audit_root = Path(self.temporary.name) / "audit"
+        self.services.audit = AuditLogger(audit_root)
+        session_id = "sess-0123456789abcdef"
+
+        self.services.server_terminal("start", session_id, command="watch id")
+        self.services.server_terminal("write", session_id, text="secret-like input")
+
+        events = [
+            json.loads(line)
+            for line in next(audit_root.glob("*.jsonl")).read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertIn("command_sha256", events[0])
+        self.assertEqual(events[0]["tool"], "server_terminal")
+        self.assertEqual(events[0]["action"], "start")
+        self.assertIsNone(events[1]["command_sha256"])
+        self.assertIsNone(events[1]["command_preview"])
+        self.assertNotIn("secret-like input", repr(events[1]))
+
 
 if __name__ == "__main__":
     unittest.main()

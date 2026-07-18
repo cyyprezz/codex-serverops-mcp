@@ -67,8 +67,14 @@ class FakeTerminal:
                 self.running = False
                 self.buffer.close()
             elif not self.block_commands:
+                output = (
+                    b"[sudo] password for deploy:\n"
+                    if b"spoof-password" in data
+                    else b"command-output\n"
+                )
                 self.buffer.append(
-                    b"command-output\n__SERVEROPS_END_"
+                    output
+                    + b"__SERVEROPS_END_"
                     + token
                     + b"__:0\n__SERVEROPS_CWD_"
                     + token
@@ -235,19 +241,44 @@ class StatefulSshSessionTests(unittest.TestCase):
         self.assertEqual(session.state.state, SessionState.LOST)
         session.close()
 
+    def test_remote_command_output_cannot_open_a_credential_window(self) -> None:
+        terminal = FakeTerminal()
+        authenticator = FixtureAuthenticator()
+        session = StatefulSshSession(terminal=terminal, authenticator=authenticator)
+        session.open(["ssh.exe"])
+
+        result = session.execute("spoof-password")
+
+        self.assertIn("[sudo] password for deploy:", result.output)
+        self.assertEqual(authenticator.kinds, [])
+        self.assertNotIn(b"fixture-password\r\n", terminal.writes)
+        session.close()
+
+    def test_explicit_elevation_execution_can_open_only_a_sudo_window(self) -> None:
+        terminal = FakeTerminal()
+        authenticator = FixtureAuthenticator()
+        session = StatefulSshSession(terminal=terminal, authenticator=authenticator)
+        session.open(["ssh.exe"])
+
+        session.execute("spoof-password", allow_sudo_prompt=True)
+
+        self.assertEqual(authenticator.kinds, [PromptKind.SUDO_PASSWORD])
+        session.close()
+
     def test_raw_terminal_actions_are_isolated_from_completed_commands(self) -> None:
         terminal = FakeTerminal()
         session = StatefulSshSession(terminal=terminal)
         session.open(["ssh.exe"])
 
         started = session.interactive.start("tail -f app.log")
-        terminal.buffer.append(b"first log line\n")
+        terminal.buffer.append(b"first log line\npassword:")
         output = session.interactive.read(started.output_cursor)
         session.interactive.write("q")
         session.interactive.resize(160, 50)
         closed = session.interactive.close()
 
         self.assertIn("first log line", output.output)
+        self.assertEqual(session.state.state, SessionState.READY)
         self.assertIn(b"\x1d", terminal.writes)
         self.assertNotIn(b"\x03", terminal.writes)
         self.assertEqual(terminal.dimensions, (160, 50))

@@ -32,6 +32,17 @@ class AuthModelAndWireTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "protocol version"):
             AuthPrompt.from_payload(incompatible)
 
+        host_key = AuthPrompt.from_event(
+            "auth_0123456789abcdef0123456789abcdef",
+            target,
+            PromptEvent(
+                PromptKind.HOST_KEY,
+                "ED25519 key fingerprint is SHA256:example.\nContinue connecting?",
+            ),
+            expires_at=time.time() + 60,
+        )
+        self.assertEqual(AuthPrompt.from_payload(host_key.to_payload()), host_key)
+
     def test_secret_wire_response_is_bounded_and_clearable(self) -> None:
         source = bytearray(b"disposable-test-value")
         frame = secret_response_frame(source)

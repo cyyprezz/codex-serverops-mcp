@@ -11,7 +11,7 @@ from codex_serverops_mcp.ssh.framing import (
     interrupt_recovery_wrapper,
     new_token,
 )
-from codex_serverops_mcp.ssh.prompts import PromptDetector
+from codex_serverops_mcp.ssh.prompts import PromptDetector, PromptKind
 from codex_serverops_mcp.terminal.contracts import TerminalProcess
 
 from .authentication import (
@@ -27,6 +27,13 @@ from .state import SessionState, SessionStateMachine
 
 COMMAND_INPUT_CHUNK_CHARACTERS = 512
 COMMAND_INPUT_FLOW_DELAY_SECONDS = 0.01
+SSH_CONNECTION_PROMPTS = frozenset(
+    {
+        PromptKind.HOST_KEY,
+        PromptKind.PASSWORD,
+        PromptKind.KEY_PASSPHRASE,
+    }
+)
 
 
 def _default_terminal(max_output_bytes: int) -> TerminalProcess:
@@ -60,14 +67,26 @@ class StatefulSshSession:
             self._read_and_handle_prompts,
         )
 
-    def open(self, ssh_arguments: Sequence[str], *, timeout: float = 20) -> None:
+    def open(
+        self,
+        ssh_arguments: Sequence[str],
+        *,
+        timeout: float = 20,
+        allow_sudo_prompt: bool = False,
+    ) -> None:
         self.state.require(SessionState.CREATED)
         self.state.transition(SessionState.STARTING)
         try:
             self.terminal.start(ssh_arguments)
+            allowed_prompts = SSH_CONNECTION_PROMPTS
+            if allow_sudo_prompt:
+                allowed_prompts |= {PromptKind.SUDO_PASSWORD}
             deadline = time.monotonic() + timeout
             while time.monotonic() < deadline:
-                self._read_and_handle_prompts(min(0.25, deadline - time.monotonic()))
+                self._read_and_handle_prompts(
+                    min(0.25, deadline - time.monotonic()),
+                    allowed_prompt_kinds=allowed_prompts,
+                )
                 if self._detector.ready:
                     self.terminal.write(
                         b"stty -echo intr '^]'; export PS1='' PS2='' PS3='' PS4=''\r\n"
@@ -88,7 +107,13 @@ class StatefulSshSession:
                 self.state.transition(SessionState.FAILED)
             raise
 
-    def execute(self, command: str, *, timeout: float = 60) -> ExecutionResult:
+    def execute(
+        self,
+        command: str,
+        *,
+        timeout: float = 60,
+        allow_sudo_prompt: bool = False,
+    ) -> ExecutionResult:
         if not command or "\x00" in command:
             raise ValueError("command must be non-empty text without NUL")
         self.state.require(SessionState.READY)
@@ -99,9 +124,17 @@ class StatefulSshSession:
         started = time.monotonic()
         try:
             self._write_command(command_wrapper(command, token))
+            allowed_prompts = (
+                frozenset({PromptKind.SUDO_PASSWORD})
+                if allow_sudo_prompt
+                else frozenset()
+            )
             deadline = started + timeout
             while time.monotonic() < deadline:
-                data = self._read_and_handle_prompts(min(0.25, deadline - time.monotonic()))
+                data = self._read_and_handle_prompts(
+                    min(0.25, deadline - time.monotonic()),
+                    allowed_prompt_kinds=allowed_prompts,
+                )
                 if data:
                     result = parser.feed(data)
                     if result is not None:
@@ -128,7 +161,11 @@ class StatefulSshSession:
                         "The connection ended before command completion could be verified."
                     )
             self._send_interrupt(token)
-            if self._wait_for_recovery(parser, timeout=5):
+            if self._wait_for_recovery(
+                parser,
+                timeout=5,
+                allowed_prompt_kinds=allowed_prompts,
+            ):
                 self.state.transition(SessionState.READY)
             else:
                 self.state.transition(SessionState.LOST)
@@ -166,7 +203,12 @@ class StatefulSshSession:
             self.terminal.close()
             self.state.transition(SessionState.CLOSED)
 
-    def _read_and_handle_prompts(self, timeout: float) -> bytes:
+    def _read_and_handle_prompts(
+        self,
+        timeout: float,
+        *,
+        allowed_prompt_kinds: frozenset[PromptKind] = frozenset(),
+    ) -> bytes:
         result = self.terminal.wait_for_data(self._cursor, max(0, timeout))
         self._cursor = result.next_cursor
         data = result.data
@@ -174,6 +216,8 @@ class StatefulSshSession:
             return b""
         text = data.decode("utf-8", errors="replace")
         for event in self._detector.feed(text):
+            if event.kind not in allowed_prompt_kinds:
+                continue
             self.state.begin_authentication()
             newline = b"\r" if self.terminal.backend_name == "winpty" else b"\r\n"
             sink = SecretInputSink(self.terminal.write, newline=newline)
@@ -233,10 +277,19 @@ class StatefulSshSession:
         time.sleep(0.2)
         self.terminal.write(interrupt_recovery_wrapper(token).encode("utf-8"))
 
-    def _wait_for_recovery(self, parser: CommandFrameParser, *, timeout: float) -> bool:
+    def _wait_for_recovery(
+        self,
+        parser: CommandFrameParser,
+        *,
+        timeout: float,
+        allowed_prompt_kinds: frozenset[PromptKind],
+    ) -> bool:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            data = self._read_and_handle_prompts(min(0.25, deadline - time.monotonic()))
+            data = self._read_and_handle_prompts(
+                min(0.25, deadline - time.monotonic()),
+                allowed_prompt_kinds=allowed_prompt_kinds,
+            )
             if data and parser.feed(data) is not None:
                 return True
             if not self.terminal.running:

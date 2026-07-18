@@ -135,6 +135,11 @@ def connect_named_pipe(path: str, *, timeout: float = 5) -> PipeConnection:
                 0,
                 None,
             )
+            try:
+                require_current_user_only(handle)
+            except BaseException:
+                win32file.CloseHandle(handle)
+                raise
             return PipeConnection(handle)
         except pywintypes.error as error:
             last_error = error

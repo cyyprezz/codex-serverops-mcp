@@ -10,10 +10,10 @@ import win32con
 from codex_serverops_mcp.errors import ServerOpsError
 
 from .task_model import (
-    MANAGED_TASK_MARKER,
     BrokerTaskSpec,
     BrokerTaskStatus,
     broker_task_name,
+    managed_description_matches,
 )
 
 TASK_ACTION_EXEC = 0
@@ -24,6 +24,29 @@ TASK_RUNLEVEL_LUA = 0
 TASK_STATE_RUNNING = 4
 TASK_TRIGGER_LOGON = 9
 ERROR_FILE_NOT_FOUND_HRESULT = 0x80070002
+
+
+def _managed_definition(
+    definition: Any,
+    description: str,
+    executable: str | None,
+    arguments: str | None,
+    trigger: Any | None,
+    account_name: str,
+) -> bool:
+    if executable is None or arguments is None or trigger is None:
+        return False
+    try:
+        return (
+            managed_description_matches(description, executable, arguments)
+            and str(definition.Principal.UserId) == account_name
+            and int(definition.Principal.LogonType) == TASK_LOGON_INTERACTIVE_TOKEN
+            and int(definition.Principal.RunLevel) == TASK_RUNLEVEL_LUA
+            and bool(trigger.Enabled)
+            and str(trigger.UserId) == account_name
+        )
+    except (AttributeError, TypeError, ValueError, pywintypes.com_error):
+        return False
 
 
 class BrokerTaskError(ServerOpsError):
@@ -56,14 +79,26 @@ class BrokerTaskController:
         if task is None:
             return BrokerTaskStatus(self.task_name, False, False, False)
         description = str(task.Definition.RegistrationInfo.Description or "")
-        action = task.Definition.Actions.Item(1) if task.Definition.Actions.Count else None
+        definition = task.Definition
+        action = definition.Actions.Item(1) if definition.Actions.Count == 1 else None
+        trigger = definition.Triggers.Item(1) if definition.Triggers.Count == 1 else None
+        executable = str(action.Path) if action is not None else None
+        arguments = str(action.Arguments) if action is not None else None
+        managed = _managed_definition(
+            definition,
+            description,
+            executable,
+            arguments,
+            trigger,
+            self.account_name,
+        )
         return BrokerTaskStatus(
             name=self.task_name,
             exists=True,
-            managed=MANAGED_TASK_MARKER in description,
+            managed=managed,
             running=int(task.State) == TASK_STATE_RUNNING,
-            executable=str(action.Path) if action is not None else None,
-            arguments=str(action.Arguments) if action is not None else None,
+            executable=executable,
+            arguments=arguments,
         )
 
     def register(self, spec: BrokerTaskSpec) -> BrokerTaskStatus:

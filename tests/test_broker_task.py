@@ -198,6 +198,27 @@ class BrokerTaskTests(unittest.TestCase):
         with self.assertRaisesRegex(BrokerTaskError, "unmanaged"):
             self.controller.remove()
 
+    def test_marker_substring_or_changed_action_never_claims_task_ownership(self) -> None:
+        definition = _definition()
+        definition.RegistrationInfo.Description = f"spoofed {MANAGED_TASK_MARKER} marker"
+        self.service.root.tasks[self.controller.task_name] = _Task(definition)
+        self.assertFalse(self.controller.inspect().managed)
+
+        self.service.root.tasks.clear()
+        self.controller.register(self.spec)
+        task = self.service.root.tasks[self.controller.task_name]
+        task.Definition.Actions.Item(1).Arguments = "changed action"
+
+        self.assertFalse(self.controller.inspect().managed)
+        with self.assertRaisesRegex(BrokerTaskError, "unmanaged"):
+            self.controller.start_if_installed()
+        with self.assertRaisesRegex(BrokerTaskError, "unmanaged"):
+            self.controller.remove()
+
+        task.Definition.Actions.Item(1).Arguments = self.spec.argument_line
+        task.Definition.Principal.LogonType = None
+        self.assertFalse(self.controller.inspect().managed)
+
     def test_manager_prefers_installed_task_for_default_runtime(self) -> None:
         task = Mock()
         task.start_if_installed.return_value = True
