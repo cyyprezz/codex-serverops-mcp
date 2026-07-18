@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import unittest
 
+from codex_serverops_mcp.broker.errors import BrokerRemoteError
 from scripts.external_interrupt_disconnect_check import (
+    NETWORK_COMMAND,
     _output_matches_marker,
+    _trigger_connection_reset,
     build_firewall_schedule_command,
     diagnose_unit,
     ensure_elevation,
@@ -30,6 +33,37 @@ class FakeElevationServices:
 
 
 class ExternalInterruptDisconnectTests(unittest.TestCase):
+    def test_disconnect_may_happen_during_scheduler_or_network_probe(self) -> None:
+        class Services:
+            def __init__(self, disconnect_call: int) -> None:
+                self.disconnect_call = disconnect_call
+                self.calls: list[tuple[str, float | None]] = []
+
+            def server_exec(
+                self,
+                _session_id: str,
+                command: str,
+                timeout: float | None = None,
+            ) -> dict[str, object]:
+                self.calls.append((command, timeout))
+                if len(self.calls) == self.disconnect_call:
+                    raise BrokerRemoteError("outcome_unknown", "connection reset")
+                return {"status": "completed", "exit_code": 0, "output": "scheduled\n"}
+
+        scheduler = Services(1)
+        self.assertEqual(
+            _trigger_connection_reset(scheduler, "session-1", "schedule"),  # type: ignore[arg-type]
+            "scheduler_command",
+        )
+        self.assertEqual(scheduler.calls, [("schedule", None)])
+
+        probe = Services(2)
+        self.assertEqual(
+            _trigger_connection_reset(probe, "session-1", "schedule"),  # type: ignore[arg-type]
+            "network_probe",
+        )
+        self.assertEqual(probe.calls, [("schedule", None), (NETWORK_COMMAND, 30)])
+
     def test_interrupt_recovery_marker_allows_only_surrounding_whitespace(self) -> None:
         self.assertTrue(
             _output_matches_marker(

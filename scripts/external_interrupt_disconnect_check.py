@@ -75,24 +75,12 @@ def run(profile_name: str) -> dict[str, object]:
 
         token = secrets.token_hex(6)
         unit = f"serverops-cut-{token}"
-        scheduled = services.server_exec(
+        disconnect_stage = _trigger_connection_reset(
+            services,
             session_id,
             build_firewall_schedule_command(token),
         )
-        _expect(
-            scheduled.get("status") == "completed"
-            and scheduled.get("exit_code") == 0
-            and str(scheduled.get("output", "")).strip() == "scheduled",
-            "self-reverting connection-specific firewall unit was not scheduled",
-        )
-        checks.append("connection_specific_self_reverting_rule_scheduled")
-
-        try:
-            services.server_exec(session_id, NETWORK_COMMAND, timeout=30)
-        except BrokerRemoteError as error:
-            _expect(error.code == "outcome_unknown", "disconnect returned the wrong error code")
-        else:
-            raise AssertionError("network command completed despite the scheduled connection reset")
+        checks.append(f"connection_reset_during_{disconnect_stage}")
         rediscovery = services.server_connection("rediscover", session_id=session_id)
         _expect(
             rediscovery.get("state") == "lost"
@@ -162,6 +150,30 @@ def ensure_elevation(
     if status.get("active") is True:
         return status
     return services.server_elevation("acquire", session_id)
+
+
+def _trigger_connection_reset(
+    services: ApplicationServices,
+    session_id: str,
+    schedule_command: str,
+) -> str:
+    try:
+        scheduled = services.server_exec(session_id, schedule_command)
+    except BrokerRemoteError as error:
+        _expect(error.code == "outcome_unknown", "disconnect returned the wrong error code")
+        return "scheduler_command"
+    _expect(
+        scheduled.get("status") == "completed"
+        and scheduled.get("exit_code") == 0
+        and str(scheduled.get("output", "")).strip() == "scheduled",
+        "self-reverting connection-specific firewall unit was not scheduled",
+    )
+    try:
+        services.server_exec(session_id, NETWORK_COMMAND, timeout=30)
+    except BrokerRemoteError as error:
+        _expect(error.code == "outcome_unknown", "disconnect returned the wrong error code")
+        return "network_probe"
+    raise AssertionError("network command completed despite the scheduled connection reset")
 
 
 def _verify_firewall_cleanup(
