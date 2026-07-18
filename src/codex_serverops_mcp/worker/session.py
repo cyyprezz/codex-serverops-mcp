@@ -377,11 +377,18 @@ class StatefulSshSession:
                 self._active_token = None
 
     def _send_interrupt(self, token: str) -> None:
-        self.terminal.write(REMOTE_VINTR_BYTE)
-        time.sleep(0.2)
-        self.terminal.write(
-            interrupt_recovery_wrapper(token, shell_nonce=self._shell_nonce).encode("utf-8")
-        )
+        try:
+            self.terminal.write(REMOTE_VINTR_BYTE)
+            time.sleep(0.2)
+            self.terminal.write(
+                interrupt_recovery_wrapper(token, shell_nonce=self._shell_nonce).encode("utf-8")
+            )
+        except Exception as error:
+            self._lose_executing_session()
+            raise OutcomeUnknown(
+                "The connection failed while interrupting a delivered command; "
+                "the command outcome is unknown."
+            ) from error
 
     def _wait_for_recovery(
         self,
@@ -419,6 +426,6 @@ class StatefulSshSession:
     def _lose_executing_session(self) -> None:
         if self.state.state is SessionState.EXECUTING:
             self.state.transition(SessionState.LOST)
-        if self.terminal.running:
-            with suppress(Exception):
+        with suppress(Exception):
+            if self.terminal.running:
                 self.terminal.terminate()

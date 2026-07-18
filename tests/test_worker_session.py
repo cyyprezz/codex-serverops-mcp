@@ -287,6 +287,29 @@ class StatefulSshSessionTests(unittest.TestCase):
         self.assertEqual(session.state.state, SessionState.READY)
         session.close()
 
+    def test_disconnect_during_timeout_interrupt_is_outcome_unknown(self) -> None:
+        class DisconnectingInterruptTerminal(FakeTerminal):
+            def write(self, data: bytes) -> None:
+                if data == b"\x1d":
+                    self.running = False
+                    self.buffer.close()
+                    raise OSError("connection closed before interrupt delivery")
+                super().write(data)
+
+        terminal = DisconnectingInterruptTerminal()
+        terminal.block_commands = True
+        session = StatefulSshSession(terminal=terminal)
+        session.open(["ssh.exe"])
+
+        with self.assertRaises(OutcomeUnknown):
+            session.execute("remote-change", timeout=0.01)
+
+        command_writes = [data for data in terminal.writes if b"remote-change" in data]
+        self.assertEqual(len(command_writes), 1)
+        self.assertEqual(session.state.state, SessionState.LOST)
+        self.assertFalse(terminal.running)
+        session.close()
+
     def test_disconnect_before_end_frame_is_outcome_unknown(self) -> None:
         terminal = FakeTerminal()
         session = StatefulSshSession(terminal=terminal)
