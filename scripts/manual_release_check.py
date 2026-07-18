@@ -7,7 +7,11 @@ import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
-from verify_release import REQUIRED_MANUAL_CHECKS
+from verify_release import (
+    REQUIRED_EXTERNAL_SCENARIOS,
+    REQUIRED_MANUAL_CHECKS,
+    VERIFIED_SCENARIO_STATUSES,
+)
 
 from codex_serverops_mcp import PACKAGE_VERSION
 
@@ -24,6 +28,30 @@ PROMPTS = {
     "interrupt_disconnect_and_no_retry": (
         "Interrupt, disconnect, outcome_unknown and no retry passed"
     ),
+    "spoofed_remote_prompt_rejected": (
+        "Remote prompt-like output could not open an unauthorized local auth window"
+    ),
+    "shell_state_corruption_detected": (
+        "Corrupting shell states completed safely or produced controlled session loss"
+    ),
+    "failed_key_transition_reports_remote_key_state": (
+        "Failed key transitions reported possible remote key presence and local rollback state"
+    ),
+    "profile_mutations_audited": (
+        "Profile, key-generation and key-installation events produced non-secret audit evidence"
+    ),
+}
+REMOTE_ENVIRONMENT_PROMPTS = {
+    "ubuntu_version": "Ubuntu version (for example 24.04.4 LTS)",
+    "remote_openssh_version": "Remote OpenSSH version",
+    "sudo_version": "Remote sudo version",
+    "bash_version": "Remote Bash version",
+}
+STATUS_CHOICES = {
+    "a": "automated",
+    "m": "manually_verified",
+    "n": "not_tested",
+    "x": "not_applicable",
 }
 
 
@@ -36,23 +64,61 @@ def run(output: Path) -> bool:
         capture_output=True,
         text=True,
     ).stdout.strip()
+    environment = {
+        "windows_version": platform.platform(),
+        "python_version": platform.python_version(),
+        "uv_version": _command_version(["uv", "--version"]),
+        "windows_openssh_version": _command_version(["ssh", "-V"]),
+    }
+    print("Record neutral version strings only; never enter a host, account or credential.")
+    for code, prompt in REMOTE_ENVIRONMENT_PROMPTS.items():
+        environment[code] = _required_answer(prompt)
     checks: dict[str, bool] = {}
     print("Use only a disposable server/account. Never paste a secret into this program.")
     for code, prompt in PROMPTS.items():
         answer = input(f"PASS {prompt}? [y/N] ")
         checks[code] = answer.strip().casefold() in {"y", "yes"}
+    scenarios: dict[str, str] = {}
+    print("Scenario status: [a]utomated [m]anually verified [n]ot tested not [x]applicable")
+    for code in sorted(REQUIRED_EXTERNAL_SCENARIOS):
+        answer = input(f"STATUS {code.replace('_', ' ')}? [a/m/n/x] ")
+        scenarios[code] = STATUS_CHOICES.get(answer.strip().casefold(), "not_tested")
     document = {
-        "schema_version": 1,
+        "schema_version": 2,
         "package_version": PACKAGE_VERSION,
         "source_revision": revision,
         "completed_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-        "windows_version": platform.platform(),
-        "python_version": platform.python_version(),
+        "environment": environment,
         "checks": checks,
+        "external_scenarios": scenarios,
     }
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return all(checks.values())
+    return all(checks.values()) and all(
+        status in VERIFIED_SCENARIO_STATUSES for status in scenarios.values()
+    )
+
+
+def _command_version(arguments: list[str]) -> str:
+    completed = subprocess.run(
+        arguments,
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    value = (completed.stdout or completed.stderr).strip().splitlines()
+    if completed.returncode != 0 or not value:
+        raise RuntimeError(f"could not capture version from {arguments[0]}")
+    return value[0][:512]
+
+
+def _required_answer(prompt: str) -> str:
+    value = input(f"{prompt}: ").strip()
+    if not value or len(value) > 512 or any(ord(character) < 32 for character in value):
+        raise ValueError(f"{prompt} is required and must be a single bounded line")
+    return value
 
 
 def main() -> None:

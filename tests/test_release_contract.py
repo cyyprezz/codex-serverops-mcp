@@ -9,11 +9,25 @@ from unittest.mock import patch
 
 from scripts.verify_distribution import EXPECTED_COMMANDS
 from scripts.verify_release import (
+    REQUIRED_EVIDENCE_ENVIRONMENT,
+    REQUIRED_EXTERNAL_SCENARIOS,
     REQUIRED_MANUAL_CHECKS,
     ReleaseContractError,
     _verify_evidence,
     verify_release,
 )
+
+
+def _evidence_document() -> dict[str, object]:
+    return {
+        "schema_version": 2,
+        "package_version": "0.1.0",
+        "source_revision": "a" * 40,
+        "completed_at": "2026-07-18T12:00:00Z",
+        "environment": dict.fromkeys(REQUIRED_EVIDENCE_ENVIRONMENT, "fixture-version"),
+        "checks": dict.fromkeys(REQUIRED_MANUAL_CHECKS, True),
+        "external_scenarios": dict.fromkeys(REQUIRED_EXTERNAL_SCENARIOS, "automated"),
+    }
 
 
 class ReleaseContractTests(unittest.TestCase):
@@ -41,15 +55,7 @@ class ReleaseContractTests(unittest.TestCase):
         with TemporaryDirectory() as temporary:
             evidence = Path(temporary) / "release-evidence.json"
             evidence.write_text(
-                json.dumps(
-                    {
-                        "schema_version": 1,
-                        "package_version": "0.1.0",
-                        "source_revision": "a" * 40,
-                        "completed_at": "2026-07-18T12:00:00Z",
-                        "checks": dict.fromkeys(REQUIRED_MANUAL_CHECKS, True),
-                    }
-                ),
+                json.dumps(_evidence_document()),
                 encoding="utf-8",
             )
             with (
@@ -70,15 +76,7 @@ class ReleaseContractTests(unittest.TestCase):
         with TemporaryDirectory() as temporary:
             evidence = Path(temporary) / "release-evidence.json"
             evidence.write_text(
-                json.dumps(
-                    {
-                        "schema_version": 1,
-                        "package_version": "0.1.0",
-                        "source_revision": "a" * 40,
-                        "completed_at": "2026-07-18T12:00:00Z",
-                        "checks": dict.fromkeys(REQUIRED_MANUAL_CHECKS, True),
-                    }
-                ),
+                json.dumps(_evidence_document()),
                 encoding="utf-8",
             )
             with patch(
@@ -96,15 +94,7 @@ class ReleaseContractTests(unittest.TestCase):
         with TemporaryDirectory() as temporary:
             evidence = Path(temporary) / "release-evidence.json"
             evidence.write_text(
-                json.dumps(
-                    {
-                        "schema_version": 1,
-                        "package_version": "0.1.0",
-                        "source_revision": "a" * 40,
-                        "completed_at": "2026-07-18T12:00:00Z",
-                        "checks": dict.fromkeys(REQUIRED_MANUAL_CHECKS, True),
-                    }
-                ),
+                json.dumps(_evidence_document()),
                 encoding="utf-8",
             )
             with (
@@ -118,6 +108,30 @@ class ReleaseContractTests(unittest.TestCase):
                 ),
                 self.assertRaisesRegex(ReleaseContractError, "exactly one"),
             ):
+                _verify_evidence(Path(temporary), evidence, "0.1.0")
+
+    def test_manual_evidence_requires_complete_environment_metadata(self) -> None:
+        with TemporaryDirectory() as temporary:
+            evidence = Path(temporary) / "release-evidence.json"
+            document = _evidence_document()
+            environment = dict(document["environment"])
+            del environment["sudo_version"]
+            document["environment"] = environment
+            evidence.write_text(json.dumps(document), encoding="utf-8")
+
+            with self.assertRaisesRegex(ReleaseContractError, "environment metadata"):
+                _verify_evidence(Path(temporary), evidence, "0.1.0")
+
+    def test_manual_evidence_rejects_unverified_external_scenario(self) -> None:
+        with TemporaryDirectory() as temporary:
+            evidence = Path(temporary) / "release-evidence.json"
+            document = _evidence_document()
+            scenarios = dict(document["external_scenarios"])
+            scenarios["timeout_recovery"] = "not_tested"
+            document["external_scenarios"] = scenarios
+            evidence.write_text(json.dumps(document), encoding="utf-8")
+
+            with self.assertRaisesRegex(ReleaseContractError, "unverified external"):
                 _verify_evidence(Path(temporary), evidence, "0.1.0")
 
 
