@@ -7,13 +7,17 @@ suitable file permissions or server-side sudoers rules.
 ## Boundaries that are and are not enforced
 
 - Current-user Windows pipe ACLs isolate MCP, broker, workers and one-use authentication channels
-  from other local users under the supported Windows model.
+  from other local users under the supported Windows model. Clients verify the connected pipe's
+  owner/DACL, and mutual nonce/HMAC proofs establish token possession without transmitting the
+  broker or worker token.
 - Passwords, key passphrases and sudo input travel only between the visible auth process and the
   worker that owns OpenSSH. They are never MCP arguments or normal broker messages.
 - `allowed_roots` constrain only `server_files` and `server_file_edit`. Arbitrary shell and raw
   terminal access retain every permission of the selected SSH user.
 - `elevation_mode` controls the guided workflow, not remote sudo authorization. Unix accounts,
   file modes and sudoers are authoritative.
+- Credential-like remote text is not trusted as an authentication request. SSH prompts are
+  accepted only during connection startup and sudo prompts only during explicit elevation.
 - Command framing correlates PTY output; it is not a security boundary or a shell sandbox.
 - Redaction recognizes limited known patterns and cannot guarantee detection of every secret.
 
@@ -31,8 +35,9 @@ event records time, profile, session, SSH/effective user, tool, action, result s
 duration, truncation and elevation state. A failed write does not falsify the remote result: the
 tool response reports `audit.logged = false`.
 
-For arbitrary commands the log contains only a UTF-8-bounded redacted preview, SHA-256 of the
-original command, and flags indicating redaction or truncation. Responses expose the same flags
+For `server_exec`, elevation `exec` and raw-terminal `start`, the log contains only a UTF-8-bounded
+redacted preview, SHA-256 of the original command, and flags indicating redaction or truncation.
+Raw terminal `write` input is never recorded as command text. Responses expose the same flags
 under `audit`. The hash supports correlation but may reveal that two commands were identical.
 
 The logger never includes PTY output, read file content, write content, patches, passwords,

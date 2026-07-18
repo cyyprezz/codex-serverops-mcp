@@ -11,8 +11,10 @@ responses, broker messages or audit logs. Host-key decisions also need a visible
 
 The session worker creates a single-use random local pipe and launches a separate visible auth
 program. The UI connects directly to that worker, receives only non-secret context plus the
-current prompt, and returns the user's input directly. It reports only success, cancellation,
-timeout or failure outside that direct channel.
+current prompt, and returns the user's input directly. The worker accepts SSH prompts only during
+connection startup and sudo prompts only during explicit elevation; remote command or raw-terminal
+output cannot authorize the auth program. It reports only success, cancellation, timeout or
+failure outside that direct channel.
 
 Every auth request has a random request ID, a fresh 256-bit connection key, a 16,384-byte
 message limit and an exact worker-protocol version. The listener accepts once and then closes.

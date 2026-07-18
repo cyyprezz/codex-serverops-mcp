@@ -30,16 +30,16 @@ class ConfigModelTests(unittest.TestCase):
             environment="production",
         )
         alias = ServerProfile(
-            display_name="Etesia Produktion",
+            display_name="Beispiel Produktion",
             connection_type=ConnectionType.SSH_CONFIG,
             authentication=Authentication.OPENSSH,
-            ssh_host="etesia-prod",
-            allowed_roots=("/opt/client-bi",),
+            ssh_host="example-prod",
+            allowed_roots=("/opt/example-app",),
             allow_file_read=True,
             elevation_mode=ElevationMode.INTERACTIVE,
             environment="production",
         )
-        original = ServerOpsConfig(profiles={"kunde-prod": direct, "etesia-prod": alias})
+        original = ServerOpsConfig(profiles={"kunde-prod": direct, "example-prod": alias})
 
         decoded, migrated = decode_config(encode_config(original))
 

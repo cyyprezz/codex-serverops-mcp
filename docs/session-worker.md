@@ -27,6 +27,8 @@ portion is returned with `truncated = true`.
 Only one command may be active. A connection loss before the end frame is `outcome_unknown`
 and is never retried. A timeout sends the proven remote `VINTR` byte and a recovery frame. The
 session becomes `READY` only if that frame is observed; otherwise it becomes `LOST`.
+Timed-out commands may already have produced side effects before interruption and are never safe
+to retry merely because their completion frame was not returned.
 
 ## Raw terminal behavior
 
@@ -41,20 +43,23 @@ is a controlled session failure.
 
 ## Authentication boundary
 
-The session does not accept passwords as `open` or `execute` parameters. When a prompt is
-detected, a worker-local authentication coordinator receives a single-use `SecretInputSink`.
+The session does not accept passwords as `open` or `execute` parameters. Prompt kinds are allowed
+only by the active local operation: SSH credentials during connection startup and sudo only during
+explicit elevation. Matching normal command or raw-terminal output is ignored. For an authorized
+prompt, a worker-local authentication coordinator receives a single-use `SecretInputSink`.
 The sink writes directly to the owned terminal and overwrites the supplied mutable byte buffer
 after use. The production visible auth process and SID-restricted one-use pipe implement that
 coordinator.
 
 ## Current verification
 
-Unit tests cover every state transition, prompt classification, bounded framing, timeout,
-manual interrupt, raw cursor reads and secret-buffer clearing. The Docker/OpenSSH spike also
-executes the product core against real Windows ConPTY with all four prompt kinds, persistent
-working directory, sudo, protected-key login and a live raw `cat` session.
+Unit tests cover every state transition, adversarial prompt spoofing, prompt classification,
+bounded framing, timeout, manual interrupt, raw cursor reads and secret-buffer clearing. Local
+Docker/OpenSSH development scripts can additionally exercise the product core against Windows
+ConPTY with all four prompt kinds, persistent working directory, sudo, protected-key login and a
+live raw `cat` session; public CI does not run that environment.
 
-The full product smoke additionally traverses application, auto-started broker, dedicated worker
-process and real Docker SSH. It verifies profile opening, persistent working directory, persistent
+The optional full product smoke traverses application, auto-started broker, dedicated worker
+process and Docker SSH. It verifies profile opening, persistent working directory, persistent
 virtual environment, exit code, cursor-based raw terminal and MCP-style reconnect without command
 retry.

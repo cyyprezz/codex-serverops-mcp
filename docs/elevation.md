@@ -7,8 +7,10 @@ root session.
 ## Security boundary
 
 `elevation_mode` controls only the guided product workflow. It cannot prevent a user from typing
-`sudo` through `server_exec` or `server_terminal`, and it cannot grant a permission denied by the
-remote sudoers policy. Operators should use a restricted SSH account and narrow sudoers rules.
+`sudo` through `server_exec` or `server_terminal`, but normal command and terminal output is never
+allowed to open the local sudo-password window. An unmanaged interactive `sudo` may therefore wait
+until it is interrupted or times out. Elevation cannot grant a permission denied by the remote
+sudoers policy. Operators should use a restricted SSH account and narrow sudoers rules.
 
 Interactive sudo uses a deterministic prompt recognized by the existing authentication
 coordinator. A password is entered only in the separate visible local authentication process and

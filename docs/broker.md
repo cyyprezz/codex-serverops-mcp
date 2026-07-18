@@ -27,8 +27,10 @@ not an SSH credential, and remains inside the SID-restricted runtime directory.
 ## Ownership and lifecycle
 
 - The deterministic per-user broker pipe enforces a single broker instance.
-- A marked current-user Task Scheduler task starts the broker outside the disposable MCP STDIO
-  process tree. It stores no password, uses least privilege and ignores duplicate starts.
+- A current-user Task Scheduler task with an exact managed description, action digest, principal,
+  trigger and least-privilege run level starts the broker outside the disposable MCP STDIO process
+  tree. A retained marker with a changed action is treated as unmanaged. The task stores no
+  password and ignores duplicate starts.
 - Each session open starts a separate worker process with a random session ID and a private
   random token inherited through the environment.
 - The broker verifies the worker status identity, performs a role-specific handshake and checks
@@ -37,6 +39,8 @@ not an SSH credential, and remains inside the SID-restricted runtime directory.
 - `session.close` asks the worker to stop, waits for it and removes only that session's status.
 - Explicit broker shutdown closes all owned workers and removes only its own status file.
 - A stopped worker is marked `lost`; no command is replayed or automatically retried.
+- IPC failure after delivery of an effectful worker request invalidates that worker connection,
+  marks the session lost and returns an operation-specific unknown-outcome code.
 - After acquiring the unique broker pipe, a replacement broker removes only status records whose
   PIDs are certainly dead. Live or unreadable records are preserved and are never adopted.
 

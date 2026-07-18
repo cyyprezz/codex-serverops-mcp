@@ -69,8 +69,9 @@ they can be tested without starting processes.
 2. State transitions live in `worker/state.py`, not in transport or MCP adapters.
 3. OpenSSH argument construction lives in `ssh/invocation.py`; no shell command string is
    built for local process startup.
-4. Prompt recognition lives in `ssh/prompts.py`. Secret transport belongs only to `auth/` and
-   the owning worker.
+4. Prompt recognition lives in `ssh/prompts.py`, but the worker authorizes prompt kinds from the
+   active local operation. Secret transport belongs only to `auth/` and the owning worker;
+   arbitrary remote output cannot authorize a dialog.
 5. Command framing lives in `ssh/framing.py`; terminal buffering remains unaware of commands.
 6. IPC envelope validation and size limits are independent from named-pipe lifecycle code.
 7. Public tool handlers perform validation and delegation, not process orchestration.
@@ -79,8 +80,10 @@ they can be tested without starting processes.
 10. Audit receives already redacted summaries and never auth payloads.
 11. Production source files are held below 450 physical lines by an architecture test. A
     responsibility must be split before that limit is raised.
-12. The persistent broker starts only through the marked least-privilege current-user task; MCP
-    clients never register or mutate that task implicitly.
+12. The persistent broker starts only through the exactly validated least-privilege current-user
+    task; MCP clients never register or mutate that task implicitly.
+13. Both IPC peers verify owner/DACL and prove token possession with nonces and HMACs before
+    requests. Any ambiguous receive invalidates that stream.
 
 ## Session invariants
 
@@ -108,7 +111,8 @@ auth path even though they are not credentials.
 - Pure unit tests: config, protocol envelopes, state machine, framing, buffers, path policy,
   redaction and audit schema.
 - Process tests: broker lifecycle, worker ownership, reconnect and IPC failures.
-- Docker integration: OpenSSH, Bash state, disconnects, sudo and remote file behavior.
+- Optional local Docker integration: OpenSSH, Bash state, disconnects, sudo and remote files;
+  public CI does not provision this environment.
 - Manual Windows release check: visible setup/auth windows and user-driven confirmations.
 
 The manual release check is never reported as automated.

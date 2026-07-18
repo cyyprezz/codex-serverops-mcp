@@ -79,7 +79,7 @@ Doctor reports the exact missing utilities before structured file work begins.
 ## Automated evidence
 
 Unit tests cover input limits, path/value encoding, response framing, UTF-8 and binary handling,
-patch conflicts, capability flags and ownership guards. A direct disposable-container smoke
-covers write/read/patch/search, symlink escape and foreign ownership. The full Windows product
-smoke traverses application, broker, worker, ConPTY and OpenSSH, including a 64 KiB transfer,
-hash conflict, symlink escape, persistent shell state, raw terminal and reconnect without retry.
+patch conflicts, capability flags and ownership guards. Optional local disposable-container and
+Windows product smokes cover write/read/patch/search, symlink escape, foreign ownership, a 64 KiB
+transfer, persistent shell state, raw terminal and reconnect without retry. Public CI runs the
+unit contract but does not provision that real SSH environment.

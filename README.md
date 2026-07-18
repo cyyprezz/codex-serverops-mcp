@@ -6,8 +6,9 @@ file operations and supports guided sudo without sending passwords or key passph
 MCP parameters.
 
 > **Development status:** the current package is `0.0.0.dev1`, not the stable `0.1.0` release.
-> It has passed automated Windows tests and a real Codex/Ubuntu integration run, but should still
-> be used with disposable or non-production accounts while release hardening is in progress.
+> Its local automated suite and manually operated development environments have passed, but the
+> public CI does not reproduce a real SSH/sudo server. Use only disposable or non-production
+> accounts while release hardening is in progress.
 
 ## What it provides
 

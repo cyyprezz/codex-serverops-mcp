@@ -20,8 +20,10 @@ policy.
 
 Registration is an explicit installer preview/apply step. The task name includes a SID-derived
 digest, and its description contains a versioned ownership marker. Installation, update and
-removal refuse an unmarked name collision. The normal MCP process only asks an already installed
-managed task to run; if no task exists, development and diagnostic paths retain direct startup.
+removal refuse an unmarked name collision. Before start, replacement or removal, ServerOps also
+validates the exact description grammar, action digest, action count, principal, run level and
+current-user logon trigger. The normal MCP process only asks an already installed managed task to
+run; if no task exists, development and diagnostic paths retain direct startup.
 
 The broker still owns all worker connections and tokens. Task Scheduler does not receive SSH or
 sudo credentials. A broker restart does not adopt orphaned workers; after acquiring the unique
