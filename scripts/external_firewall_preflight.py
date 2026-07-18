@@ -5,8 +5,11 @@ import json
 from contextlib import suppress
 
 from codex_serverops_mcp.application import ApplicationServices
-from codex_serverops_mcp.broker.client import BrokerClient
-from codex_serverops_mcp.broker.errors import BrokerUnavailable
+
+if __package__:
+    from ._external_runtime import isolated_external_services
+else:
+    from _external_runtime import isolated_external_services
 
 TOOLS = ("ufw", "iptables", "nft", "systemd-run")
 PREFLIGHT_COMMAND = """for name in ufw iptables nft systemd-run; do
@@ -35,7 +38,11 @@ def parse_tool_paths(output: str) -> dict[str, str | None]:
 def run(profile_name: str) -> dict[str, object]:
     if not profile_name.endswith("-test"):
         raise ValueError("firewall preflight requires an explicit test profile")
-    services = ApplicationServices.create()
+    with isolated_external_services() as services:
+        return _run(profile_name, services)
+
+
+def _run(profile_name: str, services: ApplicationServices) -> dict[str, object]:
     session_id: str | None = None
     try:
         opened = services.server_connection("open", profile_name=profile_name)
@@ -55,17 +62,6 @@ def run(profile_name: str) -> dict[str, object]:
         if session_id is not None:
             with suppress(Exception):
                 services.server_connection("close", session_id=session_id)
-        _shutdown_idle_broker()
-
-
-def _shutdown_idle_broker() -> None:
-    try:
-        with BrokerClient() as client:
-            if client.request("session.list").get("sessions"):
-                return
-            client.request("broker.shutdown")
-    except BrokerUnavailable:
-        pass
 
 
 def main() -> None:

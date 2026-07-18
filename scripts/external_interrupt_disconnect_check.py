@@ -9,8 +9,12 @@ import time
 from contextlib import suppress
 
 from codex_serverops_mcp.application import ApplicationServices
-from codex_serverops_mcp.broker.client import BrokerClient
-from codex_serverops_mcp.broker.errors import BrokerRemoteError, BrokerUnavailable
+from codex_serverops_mcp.broker.errors import BrokerRemoteError
+
+if __package__:
+    from ._external_runtime import isolated_external_services
+else:
+    from _external_runtime import isolated_external_services
 
 TOKEN = re.compile(r"^[a-f0-9]{12}$")
 UNIT = re.compile(r"^serverops-cut-[a-f0-9]{12}$")
@@ -54,7 +58,14 @@ def build_firewall_schedule_command(token: str) -> str:
 def run(profile_name: str) -> dict[str, object]:
     if not profile_name.endswith("-test"):
         raise ValueError("interrupt/disconnect check requires an explicit test profile")
-    services = ApplicationServices.create()
+    with isolated_external_services() as services:
+        return _run(profile_name, services)
+
+
+def _run(
+    profile_name: str,
+    services: ApplicationServices,
+) -> dict[str, object]:
     session_id: str | None = None
     checks: list[str] = []
     try:
@@ -107,13 +118,20 @@ def run(profile_name: str) -> dict[str, object]:
                 services.server_elevation("release", session_id)
             with suppress(Exception):
                 services.server_connection("close", session_id=session_id)
-        _shutdown_idle_broker()
 
 
 def diagnose_unit(profile_name: str, unit: str) -> dict[str, object]:
     if not profile_name.endswith("-test") or not UNIT.fullmatch(unit):
         raise ValueError("unit diagnosis requires an exact test profile and unit name")
-    services = ApplicationServices.create()
+    with isolated_external_services() as services:
+        return _diagnose_unit(profile_name, unit, services)
+
+
+def _diagnose_unit(
+    profile_name: str,
+    unit: str,
+    services: ApplicationServices,
+) -> dict[str, object]:
     session_id: str | None = None
     try:
         opened = services.server_connection("open", profile_name=profile_name)
@@ -140,7 +158,6 @@ def diagnose_unit(profile_name: str, unit: str) -> dict[str, object]:
                 services.server_elevation("release", session_id)
             with suppress(Exception):
                 services.server_connection("close", session_id=session_id)
-        _shutdown_idle_broker()
 
 
 def ensure_elevation(
@@ -237,16 +254,6 @@ def _check_real_interrupt(services: ApplicationServices, session_id: str) -> Non
 
 def _output_matches_marker(result: dict[str, object], marker: str) -> bool:
     return result.get("exit_code") == 0 and str(result.get("output", "")).strip() == marker
-
-
-def _shutdown_idle_broker() -> None:
-    try:
-        with BrokerClient() as client:
-            if client.request("session.list").get("sessions"):
-                return
-            client.request("broker.shutdown")
-    except BrokerUnavailable:
-        pass
 
 
 def _expect(condition: bool, message: str) -> None:

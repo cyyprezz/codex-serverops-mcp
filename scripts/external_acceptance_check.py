@@ -12,6 +12,11 @@ from codex_serverops_mcp.broker.errors import BrokerRemoteError
 from codex_serverops_mcp.config import ElevationMode, ServerProfile
 from codex_serverops_mcp.security import default_audit_path
 
+if __package__:
+    from ._external_runtime import isolated_external_services
+else:
+    from _external_runtime import isolated_external_services
+
 
 def validate_acceptance_profile(profile: ServerProfile, expected_root: str) -> None:
     if profile.environment != "test":
@@ -29,7 +34,15 @@ def validate_acceptance_profile(profile: ServerProfile, expected_root: str) -> N
 
 
 def run(profile_name: str, expected_root: str) -> dict[str, object]:
-    services = ApplicationServices.create()
+    with isolated_external_services() as services:
+        return _run(profile_name, expected_root, services)
+
+
+def _run(
+    profile_name: str,
+    expected_root: str,
+    services: ApplicationServices,
+) -> dict[str, object]:
     snapshot = services.profiles.load()
     try:
         profile = snapshot.config.profiles[profile_name]
