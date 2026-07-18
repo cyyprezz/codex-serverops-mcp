@@ -41,12 +41,12 @@ construct a shell command and does not reimplement complex OpenSSH configuration
 ```toml
 schema_version = 1
 
-[profiles."etesia-prod"]
-display_name = "Etesia Produktion"
+[profiles."example-prod"]
+display_name = "Example production"
 connection_type = "ssh_config"
 authentication = "openssh"
-ssh_host = "etesia-prod"
-allowed_roots = ["/opt/client-bi"]
+ssh_host = "example-prod"
+allowed_roots = ["/opt/example-app"]
 allow_terminal = true
 allow_file_read = true
 allow_file_write = false

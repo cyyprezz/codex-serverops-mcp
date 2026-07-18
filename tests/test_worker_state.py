@@ -24,6 +24,15 @@ class SessionStateMachineTests(unittest.TestCase):
         with self.assertRaises(InvalidSessionState):
             machine.transition(SessionState.READY)
 
+    def test_raw_terminal_state_cannot_start_authentication(self) -> None:
+        machine = SessionStateMachine()
+        machine.transition(SessionState.STARTING)
+        machine.transition(SessionState.READY)
+        machine.transition(SessionState.INTERACTIVE)
+
+        with self.assertRaises(InvalidSessionState):
+            machine.begin_authentication()
+
     def test_close_is_idempotent_at_the_boundary(self) -> None:
         machine = SessionStateMachine()
         self.assertTrue(machine.begin_close())

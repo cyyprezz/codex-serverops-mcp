@@ -11,7 +11,8 @@ Every product pipe is created with an explicit security descriptor:
 - DACL: one allow ACE for that same SID and no other allow ACE;
 - remote clients rejected by `PIPE_REJECT_REMOTE_CLIENTS`;
 - first listener instance created with `FILE_FLAG_FIRST_PIPE_INSTANCE`;
-- DACL read back from the kernel object and verified before accepting traffic.
+- DACL read back from the kernel object and verified before accepting traffic; and
+- every client verifies the connected pipe owner and DACL before beginning a handshake.
 
 Failure to inspect or match the current-user-only policy closes the operation. The current SID
 is also hashed into stable broker pipe names so different Windows users do not share a name.
@@ -32,17 +33,27 @@ payload
 ```
 
 Unknown or duplicate JSON fields, invalid identifiers, non-JSON payloads, oversized frames and
-protocol mismatches fail closed. Unknown message types produce a correlated controlled error.
+protocol mismatches fail closed. A receive timeout, partial frame, invalid frame or correlation
+failure permanently closes that connection; a later request never reuses an ambiguous stream.
+Unknown message types produce a correlated controlled error.
+
+Product handshakes have a five-second deadline. Broker responses use bounded, operation-specific
+deadlines that cover the documented maximum command duration without allowing an absent peer to
+block forever. Server request loops may remain idle for a long-lived session, but once the first
+byte of a frame arrives the complete frame must arrive within five seconds or the connection is
+discarded.
 
 ## Handshake
 
-The MCP client sends a `hello` envelope containing its role and the random broker-instance
-token read from the broker's protected runtime status. The broker compares the token using a
-constant-time comparison and returns `hello.ack` with the exact broker protocol version.
+The client first sends a fresh nonce and role without the broker-instance token. The server returns
+a fresh nonce plus an HMAC proof over both nonces, role and protocol version. Only after verifying
+that proof does the client return its own HMAC proof. The token itself never crosses the pipe.
+Both proofs use constant-time comparison, and the final acknowledgement is correlated to the
+client proof.
 
-The SID DACL is the authorization boundary. The instance token additionally rejects stale or
-misdirected clients and binds a connection to one broker lifetime; it is not a substitute for
-the DACL.
+The verified SID owner/DACL is the local authorization boundary. The instance token additionally
+rejects stale or misdirected peers and binds a connection to one broker lifetime; it is not a
+substitute for Windows object security.
 
 ## Shutdown
 

@@ -223,6 +223,7 @@ class ApplicationServices:
             command=(
                 self._optional_text(request_payload.get("command"))
                 if tool in {"server_exec", "server_elevation"}
+                or (tool == "server_terminal" and action == "start")
                 else None
             ),
         )

@@ -22,6 +22,7 @@ from codex_serverops_mcp.runtime import RuntimeDirectory
 
 from .errors import BrokerRequestError, SessionNotFound, WorkerOperationError
 from .model import SessionRecord
+from .outcomes import uncertain_outcome_code
 from .registry import SessionRegistry
 
 
@@ -41,23 +42,44 @@ class WorkerHandle:
         timeout: float | None = None,
     ) -> Envelope:
         request = Envelope.create(message_type, payload)
-        with self.request_lock:
-            self.connection.send(request)
-            response = self.connection.receive(timeout=timeout)
+        try:
+            with self.request_lock:
+                self.connection.send(request)
+                response = self.connection.receive(timeout=timeout)
+        except IpcError as error:
+            self.connection.close()
+            raise self._transport_error(message_type, payload) from error
         if response.message_id != request.message_id:
-            raise BrokerRequestError("worker response correlation ID does not match")
+            self.connection.close()
+            raise self._transport_error(message_type, payload)
         if response.message_type == "error":
             code = response.payload.get("code", "worker_error")
             message = response.payload.get("message", "worker operation failed")
             state = response.payload.get("state")
             if not isinstance(code, str) or not isinstance(message, str):
-                raise BrokerRequestError("worker error response is invalid")
+                self.connection.close()
+                raise self._transport_error(message_type, payload)
             if state is not None and not isinstance(state, str):
-                raise BrokerRequestError("worker error state is invalid")
+                self.connection.close()
+                raise self._transport_error(message_type, payload)
             raise WorkerOperationError(code, message, state)
         if response.message_type != f"{message_type}.result":
-            raise BrokerRequestError("worker response type does not match the request")
+            self.connection.close()
+            raise self._transport_error(message_type, payload)
         return response
+
+    @staticmethod
+    def _transport_error(
+        message_type: str,
+        payload: dict[str, object] | None,
+    ) -> WorkerOperationError:
+        code = uncertain_outcome_code(message_type, payload) or "worker_ipc_failed"
+        return WorkerOperationError(
+            code,
+            "The worker connection became invalid after request delivery; the operation "
+            "must not be retried automatically.",
+            "lost",
+        )
 
 
 class WorkerSupervisor:
@@ -120,7 +142,7 @@ class WorkerSupervisor:
             self._validate_status(status, session_id, profile_name, root_session=root_session)
             pipe = str(status["pipe"])
             connection = connect_named_pipe(pipe, timeout=timeout)
-            client_handshake(connection, token, role="broker")
+            client_handshake(connection, token, role="broker", timeout=timeout)
             now = time.time()
             worker_pid = int(status["pid"])
             record = SessionRecord(
@@ -135,7 +157,7 @@ class WorkerSupervisor:
                 parent_session_id=parent_session_id,
             )
             handle = WorkerHandle(record, process, connection, token, threading.Lock())
-            response = handle.request("worker.ping")
+            response = handle.request("worker.ping", timeout=5)
             if response.payload.get("pid") != worker_pid:
                 raise BrokerRequestError("worker PID verification failed")
             if open_session:
@@ -194,6 +216,8 @@ class WorkerSupervisor:
         except WorkerOperationError as error:
             if error.state is not None:
                 self._update_record_state(session_id, handle, error.state)
+            if error.state == "lost":
+                self._invalidate_handle(session_id, handle)
             raise
         result = dict(response.payload)
         state = result.get("state")
@@ -218,10 +242,13 @@ class WorkerSupervisor:
             try:
                 handle = self._handles.pop(session_id)
             except KeyError as error:
+                record = self.registry.get(session_id)
+                if record.state == "lost":
+                    return self.registry.remove(session_id)
                 raise SessionNotFound(f"session does not exist: {session_id}") from error
         try:
             if handle.process.poll() is None:
-                handle.request("worker.shutdown")
+                handle.request("worker.shutdown", timeout=5)
         except (BrokerRequestError, IpcError):
             pass
         finally:
@@ -232,6 +259,17 @@ class WorkerSupervisor:
                 self._terminate_process(handle.process)
             self.runtime.worker_status_path(session_id).unlink(missing_ok=True)
         return self.registry.remove(session_id)
+
+    def _invalidate_handle(self, session_id: str, handle: WorkerHandle) -> None:
+        with self._lock:
+            if self._handles.get(session_id) is handle:
+                del self._handles[session_id]
+        with suppress(Exception):
+            handle.connection.close()
+        with suppress(Exception):
+            self._terminate_process(handle.process)
+        with suppress(OSError):
+            self.runtime.worker_status_path(session_id).unlink(missing_ok=True)
 
     def close_all(self) -> None:
         with self._lock:

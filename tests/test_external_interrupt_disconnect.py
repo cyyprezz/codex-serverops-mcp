@@ -67,7 +67,7 @@ class ExternalInterruptDisconnectTests(unittest.TestCase):
     def test_unit_diagnosis_rejects_unmarked_names_before_connection(self) -> None:
         for unit in ("ssh", "serverops-cut-short", "serverops-cut-ABCDEF012345"):
             with self.subTest(unit=unit), self.assertRaises(ValueError):
-                diagnose_unit("hetzner-test", unit)
+                diagnose_unit("fixture-test", unit)
 
 
 if __name__ == "__main__":

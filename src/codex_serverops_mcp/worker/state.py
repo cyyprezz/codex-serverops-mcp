@@ -36,7 +36,6 @@ ALLOWED_TRANSITIONS: dict[SessionState, frozenset[SessionState]] = {
         {
             SessionState.STARTING,
             SessionState.EXECUTING,
-            SessionState.INTERACTIVE,
             SessionState.LOST,
             SessionState.FAILED,
             SessionState.CLOSING,
@@ -62,7 +61,6 @@ ALLOWED_TRANSITIONS: dict[SessionState, frozenset[SessionState]] = {
     ),
     SessionState.INTERACTIVE: frozenset(
         {
-            SessionState.AUTHENTICATION_REQUIRED,
             SessionState.READY,
             SessionState.LOST,
             SessionState.FAILED,
@@ -124,7 +122,6 @@ class SessionStateMachine:
             if self._state not in {
                 SessionState.STARTING,
                 SessionState.EXECUTING,
-                SessionState.INTERACTIVE,
             }:
                 raise InvalidSessionState(
                     f"authentication prompt is invalid in state {self._state.value}"

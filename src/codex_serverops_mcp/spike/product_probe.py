@@ -46,7 +46,10 @@ def probe_product_session_core(
         current = password_session.execute("pwd")
         if changed.cwd != "/opt/app" or current.output.strip() != "/opt/app":
             raise AssertionError("product session did not preserve its working directory")
-        elevated = password_session.execute("sudo -k; sudo -v; sudo -n id -u")
+        elevated = password_session.execute(
+            "sudo -k; sudo -v; sudo -n id -u",
+            allow_sudo_prompt=True,
+        )
         if elevated.exit_code != 0 or not elevated.output.strip().endswith("0"):
             raise AssertionError("product session sudo probe failed")
         interactive = password_session.interactive.start("cat")

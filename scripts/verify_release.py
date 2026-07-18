@@ -134,14 +134,55 @@ def _verify_evidence(repo_root: Path, path: Path, version: str) -> None:
     completed_at = evidence.get("completed_at")
     if not isinstance(completed_at, str) or not completed_at.endswith("Z"):
         raise ReleaseContractError("Release evidence has no UTC completion timestamp")
-    completed = subprocess.run(
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    if revision == head:
+        return
+    ancestor = subprocess.run(
         ["git", "merge-base", "--is-ancestor", revision, "HEAD"],
         cwd=repo_root,
         check=False,
         capture_output=True,
     )
-    if completed.returncode != 0:
-        raise ReleaseContractError("Manually tested revision is not an ancestor of release HEAD")
+    if ancestor.returncode != 0:
+        raise ReleaseContractError("Manual release evidence revision is not an ancestor of HEAD")
+    follow_up_count = subprocess.run(
+        ["git", "rev-list", "--count", f"{revision}..HEAD"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    if follow_up_count != "1":
+        raise ReleaseContractError(
+            "Manual release evidence must be HEAD or exactly one evidence-only follow-up commit"
+        )
+    changed = subprocess.run(
+        [
+            "git",
+            "diff-tree",
+            "--no-commit-id",
+            "--name-only",
+            "-r",
+            "--no-renames",
+            "HEAD",
+            "--",
+        ],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+    if changed != ["docs/release-evidence.json"]:
+        raise ReleaseContractError(
+            "Manual release evidence must match the release commit except for its own "
+            "evidence-only commit"
+        )
 
 
 def _verify_workflow(path: Path) -> None:

@@ -37,11 +37,20 @@ class PipeConnection:
         *,
         max_bytes: int = MAX_IPC_MESSAGE_BYTES,
         timeout: float | None = None,
+        frame_timeout: float | None = None,
     ) -> Envelope:
-        return decode_envelope(
-            self.receive_bytes(max_bytes=max_bytes, timeout=timeout),
-            max_bytes=max_bytes,
-        )
+        try:
+            return decode_envelope(
+                self.receive_bytes(
+                    max_bytes=max_bytes,
+                    timeout=timeout,
+                    frame_timeout=frame_timeout,
+                ),
+                max_bytes=max_bytes,
+            )
+        except BaseException:
+            self.close()
+            raise
 
     def send_bytes(
         self,
@@ -65,14 +74,25 @@ class PipeConnection:
         *,
         max_bytes: int = MAX_IPC_MESSAGE_BYTES,
         timeout: float | None = None,
+        frame_timeout: float | None = None,
     ) -> bytes:
-        deadline = None if timeout is None else time.monotonic() + max(0, timeout)
-        length = LENGTH_PREFIX.unpack(
-            self._read_exact(LENGTH_PREFIX.size, deadline=deadline)
-        )[0]
-        if length < 1 or length > max_bytes:
-            raise IpcMessageError(f"declared message length exceeds the {max_bytes}-byte limit")
-        return self._read_exact(length, deadline=deadline)
+        try:
+            deadline = None if timeout is None else time.monotonic() + max(0, timeout)
+            prefix, deadline = self._read_exact(
+                LENGTH_PREFIX.size,
+                deadline=deadline,
+                frame_timeout=frame_timeout,
+            )
+            length = LENGTH_PREFIX.unpack(prefix)[0]
+            if length < 1 or length > max_bytes:
+                raise IpcMessageError(
+                    f"declared message length exceeds the {max_bytes}-byte limit"
+                )
+            payload, _deadline = self._read_exact(length, deadline=deadline)
+            return payload
+        except BaseException:
+            self.close()
+            raise
 
     def close(self) -> None:
         if self._closed:
@@ -89,7 +109,13 @@ class PipeConnection:
                 win32pipe.DisconnectNamedPipe(handle)
         win32file.CloseHandle(handle)
 
-    def _read_exact(self, size: int, *, deadline: float | None = None) -> bytes:
+    def _read_exact(
+        self,
+        size: int,
+        *,
+        deadline: float | None = None,
+        frame_timeout: float | None = None,
+    ) -> tuple[bytes, float | None]:
         if self._closed or self._handle is None:
             raise IpcClosed("named-pipe connection is closed")
         chunks = bytearray()
@@ -106,7 +132,9 @@ class PipeConnection:
             if not chunk:
                 raise IpcClosed("named-pipe peer returned end of stream")
             chunks.extend(chunk)
-        return bytes(chunks)
+            if deadline is None and frame_timeout is not None:
+                deadline = time.monotonic() + max(0, frame_timeout)
+        return bytes(chunks), deadline
 
     def _wait_for_available_bytes(self, deadline: float) -> int:
         while True:

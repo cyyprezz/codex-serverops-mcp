@@ -10,10 +10,10 @@ import win32con
 from codex_serverops_mcp.errors import ServerOpsError
 
 from .task_model import (
-    MANAGED_TASK_MARKER,
     BrokerTaskSpec,
     BrokerTaskStatus,
     broker_task_name,
+    managed_description_matches,
 )
 
 TASK_ACTION_EXEC = 0
@@ -24,6 +24,47 @@ TASK_RUNLEVEL_LUA = 0
 TASK_STATE_RUNNING = 4
 TASK_TRIGGER_LOGON = 9
 ERROR_FILE_NOT_FOUND_HRESULT = 0x80070002
+
+
+def _managed_definition(
+    definition: Any,
+    description: str,
+    action: Any | None,
+    trigger: Any | None,
+    account_name: str,
+) -> bool:
+    if action is None or trigger is None:
+        return False
+    try:
+        executable = str(action.Path)
+        arguments = str(action.Arguments)
+        working_directory = str(action.WorkingDirectory or "")
+        settings = definition.Settings
+        return (
+            int(action.Type) == TASK_ACTION_EXEC
+            and managed_description_matches(
+                description,
+                executable,
+                arguments,
+                working_directory,
+            )
+            and str(definition.Principal.UserId) == account_name
+            and int(definition.Principal.LogonType) == TASK_LOGON_INTERACTIVE_TOKEN
+            and int(definition.Principal.RunLevel) == TASK_RUNLEVEL_LUA
+            and int(trigger.Type) == TASK_TRIGGER_LOGON
+            and bool(trigger.Enabled)
+            and str(trigger.UserId) == account_name
+            and bool(settings.Enabled)
+            and bool(settings.AllowDemandStart)
+            and bool(settings.StartWhenAvailable)
+            and not bool(settings.Hidden)
+            and not bool(settings.DisallowStartIfOnBatteries)
+            and not bool(settings.StopIfGoingOnBatteries)
+            and str(settings.ExecutionTimeLimit) == "PT0S"
+            and int(settings.MultipleInstances) == TASK_INSTANCES_IGNORE_NEW
+        )
+    except (AttributeError, TypeError, ValueError, pywintypes.com_error):
+        return False
 
 
 class BrokerTaskError(ServerOpsError):
@@ -55,15 +96,33 @@ class BrokerTaskController:
         task = self._get_task()
         if task is None:
             return BrokerTaskStatus(self.task_name, False, False, False)
-        description = str(task.Definition.RegistrationInfo.Description or "")
-        action = task.Definition.Actions.Item(1) if task.Definition.Actions.Count else None
+        executable: str | None = None
+        arguments: str | None = None
+        try:
+            definition = task.Definition
+            description = str(definition.RegistrationInfo.Description or "")
+            action = definition.Actions.Item(1) if definition.Actions.Count == 1 else None
+            trigger = definition.Triggers.Item(1) if definition.Triggers.Count == 1 else None
+            executable = str(action.Path) if action is not None else None
+            arguments = str(action.Arguments) if action is not None else None
+            managed = _managed_definition(
+                definition,
+                description,
+                action,
+                trigger,
+                self.account_name,
+            )
+            running = int(task.State) == TASK_STATE_RUNNING
+        except (AttributeError, TypeError, ValueError, pywintypes.com_error):
+            managed = False
+            running = False
         return BrokerTaskStatus(
             name=self.task_name,
             exists=True,
-            managed=MANAGED_TASK_MARKER in description,
-            running=int(task.State) == TASK_STATE_RUNNING,
-            executable=str(action.Path) if action is not None else None,
-            arguments=str(action.Arguments) if action is not None else None,
+            managed=managed,
+            running=running,
+            executable=executable,
+            arguments=arguments,
         )
 
     def register(self, spec: BrokerTaskSpec) -> BrokerTaskStatus:

@@ -59,7 +59,7 @@ class CodexConfigTests(unittest.TestCase):
                 str(Path(sys.executable).resolve()),
                 "--offline",
                 "--from",
-                str(wheel),
+                str(wheel.resolve()),
                 "codex-serverops-mcp",
             ],
         )

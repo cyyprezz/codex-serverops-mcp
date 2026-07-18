@@ -42,8 +42,9 @@ Actions:
   `command_retried = false`.
 - `close` requires `session_id` and closes only that worker/session.
 
-Opening a connection may cause `serverops-auth` to appear locally. Auth input never becomes an
-MCP parameter or broker message.
+Opening a connection may cause `serverops-auth` to appear locally. The host-key window includes
+the OpenSSH algorithm and fingerprint. Auth input never becomes an MCP parameter or broker
+message, and output from a later command cannot open this window.
 
 ## `server_exec`
 
@@ -62,7 +63,8 @@ the held Bash shell and returns:
 ```
 
 PTY output is combined and is not represented as separate stdout/stderr. A disconnect before
-the end frame remains `outcome_unknown`; neither reconnect nor any other layer retries it.
+the end frame remains `outcome_unknown`; neither reconnect nor any other layer retries it. A
+timeout can occur after remote side effects and is also never an automatic retry instruction.
 
 ## `server_terminal`
 
@@ -80,6 +82,9 @@ close      optional timeout
 
 `read` may return as soon as any new terminal chunk arrives. Continue from `next_cursor` until
 the desired output appears. `dropped_before_cursor` reports bounded-buffer loss.
+The `start` command receives the same redacted preview/hash audit treatment as `server_exec`.
+Arbitrary `write` input is never logged as command text. Credential-looking terminal output never
+opens a local authentication dialog.
 
 ## `server_files`
 

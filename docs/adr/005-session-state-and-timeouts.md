@@ -4,9 +4,10 @@ Status: accepted
 
 ## Context
 
-A blocking completed command, a raw terminal program and an authentication prompt can all use
-the same OpenSSH terminal. Treating them as unrelated calls would allow concurrent writes or
-incorrectly mark a still-running command ready after a timeout.
+A blocking completed command, a raw terminal program and an authorized authentication prompt can
+all use the same OpenSSH terminal. Authentication is forbidden during raw-terminal operation.
+Treating them as unrelated calls would allow concurrent writes or incorrectly mark a still-running
+command ready after a timeout.
 
 ## Decision
 
@@ -18,8 +19,8 @@ valid recovery frame before returning the session to `READY`. A raw terminal is 
 an interrupt plus a framed Bash synchronization command. Connection loss before a command end
 frame is `outcome_unknown` and cannot trigger a retry.
 
-Authentication is a temporary substate that returns to the exact prior state after the direct
-worker-local response is written.
+Authentication is a temporary substate of connection startup or explicit elevation that returns
+to the exact prior state after the direct worker-local response is written.
 
 ## Consequences
 

@@ -12,10 +12,16 @@ that can be inspected and tested.
 
 Use `pywin32` 312 for native named-pipe creation and security descriptors. Each listener owns
 an explicit DACL granting access only to the current process token's user SID. Remote clients
-are rejected and the effective kernel DACL is read back before use.
+are rejected, and both accepted and connected handles must match the current owner/DACL policy.
 
-Use length-prefixed, size-limited, exact-field JSON envelopes plus a versioned handshake and a
-random per-broker instance token. Do not reuse `multiprocessing.connection` in product IPC.
+Use length-prefixed, size-limited, exact-field JSON envelopes plus mutual nonce/HMAC proofs bound
+to a random per-broker instance token without transmitting that token. Any timeout, partial frame
+or invalid correlation closes the stream. Do not reuse `multiprocessing.connection` in product
+IPC.
+
+Every product handshake has a fixed deadline. Client requests use operation-specific response
+deadlines. An authenticated server connection can wait indefinitely for the first byte so an idle
+stateful session remains valid, but a started frame must complete within a fixed frame deadline.
 
 ## Consequences
 

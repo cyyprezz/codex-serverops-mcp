@@ -12,8 +12,8 @@ from uuid import uuid4
 
 from codex_serverops_mcp.ipc.security import secure_path_for_current_user
 
-BEGIN_MARKER = "# >>> codex-serverops-mcp hetzner test alias >>>"
-END_MARKER = "# <<< codex-serverops-mcp hetzner test alias <<<"
+BEGIN_MARKER = "# >>> codex-serverops-mcp managed ssh alias >>>"
+END_MARKER = "# <<< codex-serverops-mcp managed ssh alias <<<"
 SAFE_ALIAS = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 SAFE_HOST = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$")
 SAFE_USER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")

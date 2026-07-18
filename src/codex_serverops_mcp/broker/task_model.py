@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import shutil
 import subprocess
 import sys
@@ -11,6 +12,43 @@ from codex_serverops_mcp import PACKAGE_VERSION
 from codex_serverops_mcp.ipc.security import current_user_sid_string
 
 MANAGED_TASK_MARKER = "codex-serverops-mcp:broker-task:v1"
+MANAGED_DESCRIPTION = re.compile(
+    rf"^Codex ServerOps MCP per-user broker\. Managed marker: "
+    rf"{re.escape(MANAGED_TASK_MARKER)}; source=(?P<source>[^\r\n]+); "
+    r"action=(?P<action>[0-9a-f]{16})$"
+)
+
+
+def broker_action_digest(
+    executable: str | Path,
+    argument_line: str,
+    working_directory: str | Path = "",
+) -> str:
+    action = f"{executable}\0{argument_line}\0{working_directory}"
+    return hashlib.sha256(action.encode()).hexdigest()[:16]
+
+
+def _legacy_broker_action_digest(executable: str, argument_line: str) -> str:
+    return hashlib.sha256(f"{executable}\0{argument_line}".encode()).hexdigest()[:16]
+
+
+def managed_description_matches(
+    description: str,
+    executable: str,
+    argument_line: str,
+    working_directory: str,
+) -> bool:
+    match = MANAGED_DESCRIPTION.fullmatch(description)
+    expected_digests = {
+        broker_action_digest(executable, argument_line, working_directory),
+    }
+    if not working_directory:
+        expected_digests.add(_legacy_broker_action_digest(executable, argument_line))
+    return (
+        match is not None
+        and bool(match.group("source").strip())
+        and match.group("action") in expected_digests
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,9 +74,11 @@ class BrokerTaskSpec:
 
     @property
     def description(self) -> str:
-        digest = hashlib.sha256(
-            f"{self.executable}\0{self.argument_line}".encode()
-        ).hexdigest()[:16]
+        digest = broker_action_digest(
+            self.executable,
+            self.argument_line,
+            self.working_directory or "",
+        )
         return (
             "Codex ServerOps MCP per-user broker. "
             f"Managed marker: {MANAGED_TASK_MARKER}; source={self.source}; action={digest}"

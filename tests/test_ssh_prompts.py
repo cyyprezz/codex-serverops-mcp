@@ -34,6 +34,21 @@ class PromptDetectorTests(unittest.TestCase):
         events = detector.feed("\n[sudo] password for deploy:")
         self.assertEqual([event.kind for event in events], [PromptKind.SUDO_PASSWORD])
 
+    def test_host_key_event_includes_algorithm_and_fingerprint(self) -> None:
+        detector = PromptDetector()
+        notice = (
+            "The authenticity of host 'example.test' can't be established.\n"
+            "ED25519 key fingerprint is SHA256:0123456789example.\n"
+            "Are you sure you want to continue connecting (yes/no/[fingerprint])?"
+        )
+
+        events = detector.feed(notice)
+
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].kind, PromptKind.HOST_KEY)
+        self.assertIn("ED25519", events[0].prompt)
+        self.assertIn("SHA256:0123456789example", events[0].prompt)
+
     def test_ready_prompt_is_detected_without_exposing_a_full_transcript(self) -> None:
         detector = PromptDetector(history_characters=1_024)
         detector.feed("noise\nbash-5.2$ ")

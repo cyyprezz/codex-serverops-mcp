@@ -90,7 +90,7 @@ class NamedPipeTests(unittest.TestCase):
         try:
             with (
                 connect_named_pipe(listener.path) as client,
-                self.assertRaises(IpcClosed),
+                self.assertRaises(IpcAuthenticationError),
             ):
                 client_handshake(client, "wrong-token")
         finally:
@@ -98,12 +98,11 @@ class NamedPipeTests(unittest.TestCase):
             listener.close()
         self.assertFalse(thread.is_alive())
         self.assertEqual(len(errors), 1)
-        self.assertIsInstance(errors[0], IpcAuthenticationError)
+        self.assertIsInstance(errors[0], IpcClosed)
 
-    def test_receive_deadline_times_out_without_corrupting_the_pipe(self) -> None:
-        from codex_serverops_mcp.ipc.errors import IpcTimeout
+    def test_receive_deadline_invalidates_the_stream(self) -> None:
+        from codex_serverops_mcp.ipc.errors import IpcClosed, IpcTimeout
         from codex_serverops_mcp.ipc.handshake import client_handshake, server_handshake
-        from codex_serverops_mcp.ipc.messages import Envelope
         from codex_serverops_mcp.ipc.named_pipe import NamedPipeListener, connect_named_pipe
 
         listener = NamedPipeListener(self._pipe_path())
@@ -115,14 +114,8 @@ class NamedPipeTests(unittest.TestCase):
                     server_handshake(connection, "deadline-token")
                     with self.assertRaises(IpcTimeout):
                         connection.receive(timeout=0.1)
-                    request = connection.receive(timeout=1)
-                    connection.send(
-                        Envelope.create(
-                            "ping.result",
-                            {"status": "ok"},
-                            message_id=request.message_id,
-                        )
-                    )
+                    with self.assertRaises(IpcClosed):
+                        connection.receive(timeout=1)
             except BaseException as error:
                 errors.append(error)
 
@@ -131,15 +124,119 @@ class NamedPipeTests(unittest.TestCase):
         with connect_named_pipe(listener.path) as client:
             client_handshake(client, "deadline-token")
             time.sleep(0.15)
-            request = Envelope.create("ping")
-            client.send(request)
-            response = client.receive(timeout=1)
         thread.join(timeout=3)
         listener.close()
 
         self.assertFalse(thread.is_alive())
         self.assertEqual(errors, [])
-        self.assertEqual(response.payload["status"], "ok")
+
+    def test_frame_deadline_allows_idle_but_rejects_a_partial_frame(self) -> None:
+        import win32file
+
+        from codex_serverops_mcp.ipc.errors import IpcTimeout
+        from codex_serverops_mcp.ipc.messages import Envelope
+        from codex_serverops_mcp.ipc.named_pipe import NamedPipeListener, connect_named_pipe
+
+        listener = NamedPipeListener(self._pipe_path())
+        received: list[Envelope] = []
+        errors: list[BaseException] = []
+
+        def serve_complete() -> None:
+            try:
+                with listener.accept() as connection:
+                    received.append(connection.receive(frame_timeout=0.1))
+            except BaseException as error:
+                errors.append(error)
+
+        complete_thread = threading.Thread(target=serve_complete)
+        complete_thread.start()
+        with connect_named_pipe(listener.path) as client:
+            time.sleep(0.15)
+            client.send(Envelope.create("idle.complete", {}))
+        complete_thread.join(timeout=3)
+
+        def serve_partial() -> None:
+            try:
+                with listener.accept() as connection:
+                    connection.receive(frame_timeout=0.1)
+            except BaseException as error:
+                errors.append(error)
+
+        partial_thread = threading.Thread(target=serve_partial)
+        partial_thread.start()
+        with connect_named_pipe(listener.path) as client:
+            win32file.WriteFile(client._handle, b"\0")  # noqa: SLF001
+            partial_thread.join(timeout=3)
+        listener.close()
+
+        self.assertFalse(complete_thread.is_alive())
+        self.assertFalse(partial_thread.is_alive())
+        self.assertEqual(len(received), 1)
+        self.assertEqual(received[0].message_type, "idle.complete")
+        self.assertEqual(len(errors), 1)
+        self.assertIsInstance(errors[0], IpcTimeout)
+
+    def test_untrusted_server_never_receives_the_instance_token(self) -> None:
+        from codex_serverops_mcp import BROKER_PROTOCOL_VERSION
+        from codex_serverops_mcp.ipc.errors import IpcAuthenticationError
+        from codex_serverops_mcp.ipc.handshake import client_handshake
+        from codex_serverops_mcp.ipc.messages import Envelope
+        from codex_serverops_mcp.ipc.named_pipe import NamedPipeListener, connect_named_pipe
+
+        listener = NamedPipeListener(self._pipe_path())
+        received_payloads: list[dict[str, object]] = []
+
+        def serve() -> None:
+            with listener.accept() as connection:
+                challenge = connection.receive()
+                received_payloads.append(dict(challenge.payload))
+                connection.send(
+                    Envelope.create(
+                        "hello.challenge.ack",
+                        {
+                            "protocol_version": BROKER_PROTOCOL_VERSION,
+                            "server_nonce": "0" * 64,
+                            "server_proof": "0" * 64,
+                        },
+                        message_id=challenge.message_id,
+                    )
+                )
+
+        thread = threading.Thread(target=serve)
+        thread.start()
+        try:
+            with (
+                connect_named_pipe(listener.path) as client,
+                self.assertRaises(IpcAuthenticationError),
+            ):
+                client_handshake(client, "must-never-cross-the-pipe")
+        finally:
+            thread.join(timeout=3)
+            listener.close()
+
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(len(received_payloads), 1)
+        self.assertNotIn("instance_token", received_payloads[0])
+        self.assertNotIn("must-never-cross-the-pipe", repr(received_payloads))
+
+    def test_client_validates_pipe_security_before_handshake(self) -> None:
+        from unittest.mock import patch
+
+        from codex_serverops_mcp.ipc.errors import PipeSecurityError
+        from codex_serverops_mcp.ipc.named_pipe import NamedPipeListener, connect_named_pipe
+
+        listener = NamedPipeListener(self._pipe_path())
+        try:
+            with (
+                patch(
+                    "codex_serverops_mcp.ipc.named_pipe.require_current_user_only",
+                    side_effect=PipeSecurityError("spoofed owner"),
+                ),
+                self.assertRaises(PipeSecurityError),
+            ):
+                connect_named_pipe(listener.path)
+        finally:
+            listener.close()
 
 
 if __name__ == "__main__":

@@ -22,16 +22,26 @@ class FakeSession:
     def __init__(self) -> None:
         self.state = SessionStateMachine()
         self.open_arguments: list[str] = []
+        self.open_allows_sudo = False
+        self.execute_allows_sudo: list[bool] = []
         self.closed = False
 
-    def open(self, arguments, *, timeout: float) -> None:
+    def open(self, arguments, *, timeout: float, allow_sudo_prompt: bool = False) -> None:
         del timeout
         self.open_arguments = list(arguments)
+        self.open_allows_sudo = allow_sudo_prompt
         self.state.transition(SessionState.STARTING)
         self.state.transition(SessionState.READY)
 
-    def execute(self, command: str, *, timeout: float) -> ExecutionResult:
+    def execute(
+        self,
+        command: str,
+        *,
+        timeout: float,
+        allow_sudo_prompt: bool = False,
+    ) -> ExecutionResult:
         self.state.require(SessionState.READY)
+        self.execute_allows_sudo.append(allow_sudo_prompt)
         return ExecutionResult(
             output="0" if command == "id -u" else f"ran:{command}",
             exit_code=0,
@@ -64,6 +74,7 @@ class WorkerSessionServiceTests(unittest.TestCase):
                 port=22,
                 user="deploy",
                 environment="production",
+                elevation_mode=ElevationMode.INTERACTIVE,
             )
             repository.save(ServerOpsConfig(profiles={"prod": profile}))
             sessions: list[FakeSession] = []
@@ -89,14 +100,17 @@ class WorkerSessionServiceTests(unittest.TestCase):
 
             opened = service.open()
             executed = service.execute("pwd")
+            acquired = service.elevation("acquire", {})
 
             self.assertEqual(opened["state"], "ready")
             self.assertEqual(opened["ssh_user"], "deploy")
             self.assertEqual(opened["effective_user"], "deploy")
             self.assertEqual(executed["cwd"], "/opt/app")
             self.assertEqual(executed["output"], "ran:pwd")
+            self.assertTrue(acquired["active"])
             self.assertIn(str(known_hosts.resolve()), " ".join(sessions[0].open_arguments))
             self.assertEqual(auth_targets[0].host, "192.0.2.20")
+            self.assertEqual(sessions[0].execute_allows_sudo, [False, True])
             self.assertTrue(inspect_path_security(str(known_hosts)).current_user_only)
             service.close()
             self.assertTrue(sessions[0].closed)
@@ -143,6 +157,7 @@ class WorkerSessionServiceTests(unittest.TestCase):
             self.assertEqual(opened["effective_user"], "root")
             self.assertTrue(opened["root_session"])
             self.assertIn("sudo -n -i", " ".join(sessions[0].open_arguments))
+            self.assertFalse(sessions[0].open_allows_sudo)
             with self.assertRaises(RemoteFileError) as captured:
                 service.files("stat", {"path": "/opt/app"}, write=False)
             self.assertEqual(captured.exception.code, "root_session_file_access_disabled")

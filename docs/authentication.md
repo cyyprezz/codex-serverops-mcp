@@ -1,8 +1,15 @@
 # Visible authentication isolation
 
 `serverops-auth` is a separate local Tk window started by the session worker for exactly one
-OpenSSH or sudo prompt. It displays the profile, target, user and original prompt. Password and
-passphrase inputs are masked; host keys require an explicit confirm or reject decision.
+locally authorized OpenSSH or sudo prompt. It displays the profile, target, user and original
+prompt. Password and passphrase inputs are masked; host keys show the bounded OpenSSH notice,
+including key algorithm and fingerprint, and require an explicit confirm or reject decision.
+
+Credential prompts are operation-bound. Host-key, SSH-password and key-passphrase prompts are
+accepted only while OpenSSH is establishing a configured connection. A sudo prompt is accepted
+only while an explicit interactive elevation action or root-session opening is executing. Text
+printed by `server_exec` or an interactive remote program can never open an authentication
+window, even when it resembles a password prompt.
 
 ## Direct data path
 
@@ -49,6 +56,10 @@ Python, Tk and Windows may create internal memory copies that cannot be reliably
 overwritten. The product therefore promises no persistence, logging or routing through MCP and
 broker—not an impossible guarantee that a credential never exists in process memory while it is
 being entered and transmitted.
+
+ServerOps uses its own protected `known_hosts` file below the local configuration directory.
+Trusting a displayed fingerprint therefore affects ServerOps connections, not the user's normal
+OpenSSH `known_hosts` file.
 
 ## Verification boundary
 

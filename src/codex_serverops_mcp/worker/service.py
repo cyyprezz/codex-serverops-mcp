@@ -5,7 +5,12 @@ from contextlib import suppress
 from pathlib import Path
 
 from codex_serverops_mcp.auth.model import AuthTargetContext
-from codex_serverops_mcp.config import ServerProfile, TomlProfileRepository, default_config_path
+from codex_serverops_mcp.config import (
+    ElevationMode,
+    ServerProfile,
+    TomlProfileRepository,
+    default_config_path,
+)
 from codex_serverops_mcp.elevation import ElevationService
 from codex_serverops_mcp.elevation.errors import ElevationError
 from codex_serverops_mcp.errors import ConfigurationError
@@ -88,6 +93,10 @@ class WorkerSessionService:
                     root_session=self.root_session,
                 ),
                 timeout=SESSION_OPEN_TIMEOUT_SECONDS,
+                allow_sudo_prompt=(
+                    self.root_session
+                    and profile.elevation_mode is ElevationMode.INTERACTIVE
+                ),
             )
             if self.root_session:
                 verification = session.execute(
@@ -142,21 +151,33 @@ class WorkerSessionService:
                 "guided sudo actions are unavailable inside a root session",
             )
         assert self.target is not None
-        return ElevationService(profile, self.target.user, self._execute_internal).handle(
-            action,
-            payload,
+        allow_sudo_prompt = (
+            profile.elevation_mode is ElevationMode.INTERACTIVE
+            and action in {"acquire", "exec"}
         )
+
+        def run_elevation(command: str, timeout: float | None) -> dict[str, object]:
+            return self._execute_internal(
+                command,
+                timeout,
+                allow_sudo_prompt=allow_sudo_prompt,
+            )
+
+        return ElevationService(profile, self.target.user, run_elevation).handle(action, payload)
 
     def _execute_internal(
         self,
         command: str,
         timeout: float | None = None,
+        *,
+        allow_sudo_prompt: bool = False,
     ) -> dict[str, object]:
         session, profile = self._open_session()
         session.state.require(SessionState.READY)
         result = session.execute(
             command,
             timeout=profile.command_timeout_seconds if timeout is None else timeout,
+            allow_sudo_prompt=allow_sudo_prompt,
         )
         self.cwd = result.cwd
         return {

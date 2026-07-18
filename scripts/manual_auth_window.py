@@ -10,7 +10,11 @@ from codex_serverops_mcp.worker.authentication import SecretInputSink
 from codex_serverops_mcp.worker.visible_auth import VisibleAuthenticationCoordinator
 
 PROMPTS = {
-    PromptKind.HOST_KEY: "Are you sure you want to continue connecting (yes/no)?",
+    PromptKind.HOST_KEY: (
+        "The authenticity of host 'manual.invalid' can't be established.\n"
+        "ED25519 key fingerprint is SHA256:manual-release-check.\n"
+        "Are you sure you want to continue connecting (yes/no/[fingerprint])?"
+    ),
     PromptKind.PASSWORD: "operator@manual.invalid's password:",
     PromptKind.KEY_PASSPHRASE: "Enter passphrase for key 'manual-check':",
     PromptKind.SUDO_PASSWORD: "[sudo] password for operator:",

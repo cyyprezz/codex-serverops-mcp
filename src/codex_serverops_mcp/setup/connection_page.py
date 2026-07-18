@@ -117,7 +117,7 @@ class ConnectionPage(ttk.Frame):
             text=(
                 "IP-Adresse oder Hostname, zum Beispiel 192.168.1.50 oder server.example.org."
                 if direct
-                else "Name aus deiner bestehenden OpenSSH-Konfiguration, zum Beispiel etesia-prod."
+                else "Name aus deiner bestehenden OpenSSH-Konfiguration, zum Beispiel example-prod."
             )
         )
         if direct:

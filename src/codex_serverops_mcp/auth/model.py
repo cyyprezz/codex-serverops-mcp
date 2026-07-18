@@ -33,6 +33,19 @@ def _validate_text(value: str, field_name: str, *, maximum: int) -> None:
         raise ValueError(f"{field_name} has an invalid value")
 
 
+def _validate_prompt_text(value: str) -> None:
+    if (
+        not value
+        or value != value.strip()
+        or len(value) > 2_048
+        or any(
+            (ord(character) < 32 and character != "\n") or ord(character) == 127
+            for character in value
+        )
+    ):
+        raise ValueError("prompt has an invalid value")
+
+
 @dataclass(frozen=True, slots=True)
 class AuthTargetContext:
     profile_name: str
@@ -69,7 +82,7 @@ class AuthPrompt:
             raise ValueError("authentication target context is invalid")
         if not isinstance(self.kind, PromptKind):
             raise ValueError("authentication prompt kind is invalid")
-        _validate_text(self.prompt, "prompt", maximum=2_048)
+        _validate_prompt_text(self.prompt)
         if (
             isinstance(self.expires_at, bool)
             or not isinstance(self.expires_at, int | float)
