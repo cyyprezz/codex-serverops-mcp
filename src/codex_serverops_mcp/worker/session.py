@@ -7,9 +7,11 @@ from contextlib import suppress
 
 from codex_serverops_mcp.ssh.framing import (
     CommandFrameParser,
+    FrameProtocolError,
     command_wrapper,
     interrupt_recovery_wrapper,
     new_token,
+    shell_bootstrap_wrapper,
 )
 from codex_serverops_mcp.ssh.prompts import PromptDetector, PromptKind
 from codex_serverops_mcp.terminal.contracts import TerminalProcess
@@ -27,6 +29,8 @@ from .state import SessionState, SessionStateMachine
 
 COMMAND_INPUT_CHUNK_CHARACTERS = 512
 COMMAND_INPUT_FLOW_DELAY_SECONDS = 0.01
+SHELL_BOOTSTRAP_TIMEOUT_SECONDS = 5.0
+RECOVERY_TIMEOUT_SECONDS = 5.0
 SSH_CONNECTION_PROMPTS = frozenset(
     {
         PromptKind.HOST_KEY,
@@ -61,10 +65,12 @@ class StatefulSshSession:
         self._cursor = 0
         self._active_token: str | None = None
         self._active_lock = threading.Lock()
+        self._shell_nonce = new_token()
         self.interactive = InteractiveTerminalController(
             self.terminal,
             self.state,
             self._read_and_handle_prompts,
+            shell_nonce=self._shell_nonce,
         )
 
     def open(
@@ -88,10 +94,12 @@ class StatefulSshSession:
                     allowed_prompt_kinds=allowed_prompts,
                 )
                 if self._detector.ready:
-                    self.terminal.write(
-                        b"stty -echo intr '^]'; export PS1='' PS2='' PS3='' PS4=''\r\n"
+                    self._initialize_shell(
+                        timeout=min(
+                            SHELL_BOOTSTRAP_TIMEOUT_SECONDS,
+                            max(0.1, deadline - time.monotonic()),
+                        )
                     )
-                    self._drain(0.2)
                     self.state.transition(SessionState.READY)
                     return
                 if not self.terminal.running:
@@ -118,12 +126,18 @@ class StatefulSshSession:
             raise ValueError("command must be non-empty text without NUL")
         self.state.require(SessionState.READY)
         token = new_token()
-        parser = CommandFrameParser(token, max_output_bytes=self.max_output_bytes)
+        parser = CommandFrameParser(
+            token,
+            max_output_bytes=self.max_output_bytes,
+            shell_nonce=self._shell_nonce,
+        )
         self._activate_command(token)
         self.state.transition(SessionState.EXECUTING)
         started = time.monotonic()
         try:
-            self._write_command(command_wrapper(command, token))
+            self._write_command(
+                command_wrapper(command, token, shell_nonce=self._shell_nonce)
+            )
             allowed_prompts = (
                 frozenset({PromptKind.SUDO_PASSWORD})
                 if allow_sudo_prompt
@@ -136,8 +150,21 @@ class StatefulSshSession:
                     allowed_prompt_kinds=allowed_prompts,
                 )
                 if data:
-                    result = parser.feed(data)
+                    try:
+                        result = parser.feed(data)
+                    except FrameProtocolError as error:
+                        self._lose_executing_session()
+                        raise OutcomeUnknown(
+                            "Shell framing became invalid after command delivery; "
+                            "the command outcome is unknown."
+                        ) from error
                     if result is not None:
+                        if not self.terminal.running:
+                            self._lose_executing_session()
+                            raise OutcomeUnknown(
+                                "The shell ended after command delivery; the command outcome "
+                                "and reusable session state cannot be trusted."
+                            )
                         self.state.transition(SessionState.READY)
                         return ExecutionResult(
                             output=result.output,
@@ -147,30 +174,33 @@ class StatefulSshSession:
                             duration_ms=round((time.monotonic() - started) * 1_000),
                         )
                 if not self.terminal.running:
-                    final = parser.feed(b"", final=True)
-                    self.state.transition(SessionState.LOST)
-                    if final is not None:
-                        return ExecutionResult(
-                            output=final.output,
-                            exit_code=final.exit_code,
-                            cwd=final.cwd,
-                            truncated=final.truncated,
-                            duration_ms=round((time.monotonic() - started) * 1_000),
-                        )
+                    with suppress(FrameProtocolError):
+                        parser.feed(b"", final=True)
+                    self._lose_executing_session()
                     raise OutcomeUnknown(
                         "The connection ended before command completion could be verified."
                     )
             self._send_interrupt(token)
-            if self._wait_for_recovery(
-                parser,
-                timeout=5,
-                allowed_prompt_kinds=allowed_prompts,
-            ):
+            try:
+                recovered = self._wait_for_recovery(
+                    parser,
+                    timeout=RECOVERY_TIMEOUT_SECONDS,
+                    allowed_prompt_kinds=allowed_prompts,
+                )
+            except FrameProtocolError as error:
+                self._lose_executing_session()
+                raise OutcomeUnknown(
+                    "The command timed out and recovery framing was invalid; the outcome "
+                    "is unknown."
+                ) from error
+            if recovered and self.terminal.running:
                 self.state.transition(SessionState.READY)
-            else:
-                self.state.transition(SessionState.LOST)
-                self.terminal.terminate()
-            raise CommandTimedOut(f"command exceeded its {timeout:.1f}-second timeout")
+                raise CommandTimedOut(f"command exceeded its {timeout:.1f}-second timeout")
+            self._lose_executing_session()
+            raise OutcomeUnknown(
+                "The command timed out and shell recovery could not be verified; "
+                "the outcome is unknown."
+            )
         except BaseException:
             if self.state.state is SessionState.EXECUTING:
                 self.state.transition(
@@ -233,10 +263,31 @@ class StatefulSshSession:
             self.state.finish_authentication()
         return data
 
-    def _drain(self, seconds: float) -> None:
-        deadline = time.monotonic() + seconds
+    def _initialize_shell(self, *, timeout: float) -> None:
+        token = new_token()
+        parser = CommandFrameParser(
+            token,
+            max_output_bytes=4_096,
+            shell_nonce=self._shell_nonce,
+        )
+        self._write_command(shell_bootstrap_wrapper(self._shell_nonce, token))
+        deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            self._read_and_handle_prompts(deadline - time.monotonic())
+            data = self._read_and_handle_prompts(min(0.25, deadline - time.monotonic()))
+            if data:
+                try:
+                    result = parser.feed(data)
+                except FrameProtocolError as error:
+                    raise SessionError("the Bash bootstrap frame was invalid") from error
+                if result is not None:
+                    if not self.terminal.running:
+                        raise SessionLost("OpenSSH exited during Bash bootstrap")
+                    if result.exit_code != 0:
+                        raise SessionError("the Bash bootstrap command failed")
+                    return
+            if not self.terminal.running:
+                raise SessionLost("OpenSSH exited during Bash bootstrap")
+        raise SessionError("timed out while verifying control of the original Bash shell")
 
     def _activate_command(self, token: str) -> None:
         with self._active_lock:
@@ -275,7 +326,9 @@ class StatefulSshSession:
     def _send_interrupt(self, token: str) -> None:
         self.terminal.write(REMOTE_VINTR_BYTE)
         time.sleep(0.2)
-        self.terminal.write(interrupt_recovery_wrapper(token).encode("utf-8"))
+        self.terminal.write(
+            interrupt_recovery_wrapper(token, shell_nonce=self._shell_nonce).encode("utf-8")
+        )
 
     def _wait_for_recovery(
         self,
@@ -295,3 +348,10 @@ class StatefulSshSession:
             if not self.terminal.running:
                 return False
         return False
+
+    def _lose_executing_session(self) -> None:
+        if self.state.state is SessionState.EXECUTING:
+            self.state.transition(SessionState.LOST)
+        if self.terminal.running:
+            with suppress(Exception):
+                self.terminal.terminate()
