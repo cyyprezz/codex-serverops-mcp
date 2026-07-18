@@ -18,9 +18,11 @@ from codex_serverops_mcp.broker.task_model import (
     wheel_broker_task_spec,
 )
 from codex_serverops_mcp.broker.task_scheduler import (
+    TASK_ACTION_EXEC,
     TASK_INSTANCES_IGNORE_NEW,
     TASK_LOGON_INTERACTIVE_TOKEN,
     TASK_RUNLEVEL_LUA,
+    TASK_TRIGGER_LOGON,
     BrokerTaskController,
     BrokerTaskError,
 )
@@ -37,6 +39,7 @@ class _Collection:
 
     def Create(self, _kind: int) -> SimpleNamespace:
         item = self.factory()
+        item.Type = _kind
         self.items.append(item)
         return item
 
@@ -45,18 +48,36 @@ class _Collection:
 
 
 def _action() -> SimpleNamespace:
-    return SimpleNamespace(Path="", Arguments="", WorkingDirectory="")
+    return SimpleNamespace(
+        Type=TASK_ACTION_EXEC,
+        Path="",
+        Arguments="",
+        WorkingDirectory="",
+    )
 
 
 def _trigger() -> SimpleNamespace:
-    return SimpleNamespace(Enabled=False, UserId="")
+    return SimpleNamespace(Type=TASK_TRIGGER_LOGON, Enabled=False, UserId="")
+
+
+def _settings() -> SimpleNamespace:
+    return SimpleNamespace(
+        Enabled=False,
+        AllowDemandStart=False,
+        StartWhenAvailable=False,
+        Hidden=False,
+        DisallowStartIfOnBatteries=True,
+        StopIfGoingOnBatteries=True,
+        ExecutionTimeLimit="PT72H",
+        MultipleInstances=None,
+    )
 
 
 def _definition() -> SimpleNamespace:
     return SimpleNamespace(
         RegistrationInfo=SimpleNamespace(Description=""),
         Principal=SimpleNamespace(UserId="", LogonType=None, RunLevel=None),
-        Settings=SimpleNamespace(),
+        Settings=_settings(),
         Triggers=_Collection(_trigger),
         Actions=_Collection(_action),
     )
@@ -218,6 +239,26 @@ class BrokerTaskTests(unittest.TestCase):
         task.Definition.Actions.Item(1).Arguments = self.spec.argument_line
         task.Definition.Principal.LogonType = None
         self.assertFalse(self.controller.inspect().managed)
+
+    def test_changed_trigger_action_directory_or_settings_are_unmanaged(self) -> None:
+        mutations = (
+            lambda definition: setattr(definition.Triggers.Item(1), "Type", 999),
+            lambda definition: setattr(definition.Actions.Item(1), "Type", 999),
+            lambda definition: setattr(
+                definition.Actions.Item(1),
+                "WorkingDirectory",
+                str(Path.cwd()),
+            ),
+            lambda definition: setattr(definition.Settings, "Enabled", False),
+            lambda definition: setattr(definition.Settings, "MultipleInstances", 999),
+        )
+        for mutate in mutations:
+            with self.subTest(mutation=mutate):
+                self.service.root.tasks.clear()
+                self.controller.register(self.spec)
+                definition = self.service.root.tasks[self.controller.task_name].Definition
+                mutate(definition)
+                self.assertFalse(self.controller.inspect().managed)
 
     def test_manager_prefers_installed_task_for_default_runtime(self) -> None:
         task = Mock()

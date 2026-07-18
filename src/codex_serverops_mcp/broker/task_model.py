@@ -19,7 +19,16 @@ MANAGED_DESCRIPTION = re.compile(
 )
 
 
-def broker_action_digest(executable: str | Path, argument_line: str) -> str:
+def broker_action_digest(
+    executable: str | Path,
+    argument_line: str,
+    working_directory: str | Path = "",
+) -> str:
+    action = f"{executable}\0{argument_line}\0{working_directory}"
+    return hashlib.sha256(action.encode()).hexdigest()[:16]
+
+
+def _legacy_broker_action_digest(executable: str, argument_line: str) -> str:
     return hashlib.sha256(f"{executable}\0{argument_line}".encode()).hexdigest()[:16]
 
 
@@ -27,12 +36,18 @@ def managed_description_matches(
     description: str,
     executable: str,
     argument_line: str,
+    working_directory: str,
 ) -> bool:
     match = MANAGED_DESCRIPTION.fullmatch(description)
+    expected_digests = {
+        broker_action_digest(executable, argument_line, working_directory),
+    }
+    if not working_directory:
+        expected_digests.add(_legacy_broker_action_digest(executable, argument_line))
     return (
         match is not None
         and bool(match.group("source").strip())
-        and match.group("action") == broker_action_digest(executable, argument_line)
+        and match.group("action") in expected_digests
     )
 
 
@@ -59,7 +74,11 @@ class BrokerTaskSpec:
 
     @property
     def description(self) -> str:
-        digest = broker_action_digest(self.executable, self.argument_line)
+        digest = broker_action_digest(
+            self.executable,
+            self.argument_line,
+            self.working_directory or "",
+        )
         return (
             "Codex ServerOps MCP per-user broker. "
             f"Managed marker: {MANAGED_TASK_MARKER}; source={self.source}; action={digest}"

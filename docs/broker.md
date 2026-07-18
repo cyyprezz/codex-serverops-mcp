@@ -27,10 +27,10 @@ not an SSH credential, and remains inside the SID-restricted runtime directory.
 ## Ownership and lifecycle
 
 - The deterministic per-user broker pipe enforces a single broker instance.
-- A current-user Task Scheduler task with an exact managed description, action digest, principal,
-  trigger and least-privilege run level starts the broker outside the disposable MCP STDIO process
-  tree. A retained marker with a changed action is treated as unmanaged. The task stores no
-  password and ignores duplicate starts.
+- A current-user Task Scheduler task with an exact managed description, action digest, execution
+  action type, working directory, principal, logon trigger, least-privilege run level and managed
+  settings starts the broker outside the disposable MCP STDIO process tree. Any changed property
+  is treated as unmanaged. The task stores no password and ignores duplicate starts.
 - Each session open starts a separate worker process with a random session ID and a private
   random token inherited through the environment.
 - The broker verifies the worker status identity, performs a role-specific handshake and checks
