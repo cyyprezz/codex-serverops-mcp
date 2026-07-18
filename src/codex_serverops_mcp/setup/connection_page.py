@@ -33,7 +33,8 @@ class ConnectionPage(ttk.Frame):
             row,
             "Profil-Kürzel",
             state.profile_name,
-            "Kurzes eindeutiges Kürzel ohne Leerzeichen, zum Beispiel „shop-prod“.",
+            "Kurzes Kürzel ohne Leerzeichen, zum Beispiel „shop-prod“. "
+            "Es steht im lokalen Audit; nutze keine IP oder geheime Angabe.",
             disabled=lock_profile_name,
         )
         row += 3

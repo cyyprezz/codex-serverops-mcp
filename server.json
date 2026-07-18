@@ -1,0 +1,22 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.cyyprezz/codex-serverops-mcp",
+  "title": "Codex ServerOps MCP",
+  "description": "Stateful Windows OpenSSH server operations for Codex with local credential handling.",
+  "repository": {
+    "url": "https://github.com/cyyprezz/codex-serverops-mcp",
+    "source": "github"
+  },
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "codex-serverops-mcp",
+      "version": "0.1.0",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}

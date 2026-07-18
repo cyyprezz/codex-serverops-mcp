@@ -9,8 +9,6 @@ from codex_serverops_mcp.config import (
     ServerProfile,
 )
 
-from .prompts import SUDO_PROMPT_TEXT
-
 
 def build_ssh_arguments(
     profile: ServerProfile,
@@ -18,6 +16,7 @@ def build_ssh_arguments(
     ssh_executable: Path,
     known_hosts_file: Path,
     root_session: bool = False,
+    root_sudo_prompt: str | None = None,
 ) -> list[str]:
     """Build argv for Windows OpenSSH without constructing a shell command."""
     arguments = [
@@ -49,6 +48,17 @@ def build_ssh_arguments(
                     "PubkeyAuthentication=no",
                 )
             )
+        else:
+            arguments.extend(
+                (
+                    "-o",
+                    "PreferredAuthentications=publickey",
+                    "-o",
+                    "PasswordAuthentication=no",
+                    "-o",
+                    "KbdInteractiveAuthentication=no",
+                )
+            )
         if profile.identity_file is not None:
             arguments.extend(("-i", profile.identity_file, "-o", "IdentitiesOnly=yes"))
         target = profile.host
@@ -58,16 +68,37 @@ def build_ssh_arguments(
             arguments.extend(("-i", profile.identity_file, "-o", "IdentitiesOnly=yes"))
         target = profile.ssh_host
 
-    remote_command = ["bash", "--noprofile", "--norc", "-i"]
+    remote_command = ["/bin/bash", "--noprofile", "--norc", "-i"]
     if root_session:
+        if (
+            profile.elevation_mode is ElevationMode.INTERACTIVE
+            and not root_sudo_prompt
+        ):
+            raise ValueError("interactive root sessions require an operation-bound sudo prompt")
         non_interactive = (
             ["-n"] if profile.elevation_mode is ElevationMode.NON_INTERACTIVE else []
         )
         prompt = (
             []
             if profile.elevation_mode is ElevationMode.NON_INTERACTIVE
-            else ["-p", SUDO_PROMPT_TEXT]
+            else ["-p", root_sudo_prompt]
         )
-        remote_command = ["sudo", *non_interactive, *prompt, "-i", "--", *remote_command]
+        remote_command = [
+            "/usr/bin/sudo",
+            *non_interactive,
+            *prompt,
+            "-i",
+            "--",
+            "/usr/bin/env",
+            "-u",
+            "BASH_ENV",
+            "-u",
+            "ENV",
+            "-u",
+            "SHELLOPTS",
+            "-u",
+            "BASHOPTS",
+            *remote_command,
+        ]
     arguments.extend(("--", target, *remote_command))
     return arguments

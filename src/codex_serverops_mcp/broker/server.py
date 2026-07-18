@@ -32,6 +32,7 @@ from codex_serverops_mcp.runtime import RuntimeDirectory
 from .errors import BrokerAlreadyRunning, BrokerRequestError
 from .model import SessionRecord
 from .supervisor import WorkerSupervisor
+from .timeouts import WORKER_LONG_OPERATION_TIMEOUT_SECONDS
 
 
 def _process_is_alive(pid: int) -> bool:
@@ -185,14 +186,25 @@ class BrokerServer:
                 "worker.status",
                 timeout=5,
             )
-        if message_type == "session.reconnect":
+        if message_type == "session.rediscover":
             self._require_fields(payload, {"session_id"})
+            session_id = self._session_id_value(payload)
+            record = self.supervisor.get(session_id)
+            if record.state == "lost":
+                return {
+                    **self._session_metadata(
+                        record,
+                        {"pid": record.worker_pid, "state": "lost"},
+                    ),
+                    "rediscovered": True,
+                    "command_retried": False,
+                }
             result = self._request_session(
-                self._session_id_value(payload),
+                session_id,
                 "worker.status",
                 timeout=5,
             )
-            return {**result, "reconnected": True, "command_retried": False}
+            return {**result, "rediscovered": True, "command_retried": False}
         if message_type == "session.exec":
             self._require_fields(payload, {"session_id", "command"}, optional={"timeout"})
             session_id = self._session_id_value(payload)
@@ -209,7 +221,7 @@ class BrokerServer:
                 session_id,
                 "worker.exec",
                 worker_payload,
-                timeout=3_730,
+                timeout=WORKER_LONG_OPERATION_TIMEOUT_SECONDS,
             )
         if message_type == "session.terminal":
             if "session_id" not in payload:
@@ -236,7 +248,7 @@ class BrokerServer:
                 session_id,
                 worker_type,
                 worker_payload,
-                timeout=3_730,
+                timeout=WORKER_LONG_OPERATION_TIMEOUT_SECONDS,
             )
         if message_type == "session.elevation":
             return self._handle_elevation(payload)
@@ -286,7 +298,7 @@ class BrokerServer:
             session_id,
             "worker.elevation",
             worker_payload,
-            timeout=3_730,
+            timeout=WORKER_LONG_OPERATION_TIMEOUT_SECONDS,
         )
 
     def _request_session(

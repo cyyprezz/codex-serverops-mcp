@@ -21,6 +21,7 @@ from codex_serverops_mcp.ipc.security import pipe_name_for_current_user
 from codex_serverops_mcp.ssh.prompts import PromptEvent
 
 from .errors import (
+    AuthenticationCancelled,
     AuthenticationProtocolError,
     AuthenticationReplayError,
     AuthenticationTimedOut,
@@ -63,6 +64,8 @@ class AuthChallengeServer:
         self._lock = threading.Lock()
         self._collect_started = False
         self._authenticated = False
+        self._cancelled = threading.Event()
+        self._active_connection: PipeConnection | None = None
 
     @property
     def descriptor(self) -> AuthLaunchDescriptor:
@@ -80,8 +83,21 @@ class AuthChallengeServer:
             self._collect_started = True
         try:
             while time.monotonic() < self._deadline:
-                connection = self._accept_before_deadline()
+                try:
+                    connection = self._accept_before_deadline()
+                except BaseException:
+                    if self._cancelled.is_set():
+                        raise AuthenticationCancelled(
+                            "authentication request was cancelled"
+                        ) from None
+                    raise
                 with connection:
+                    with self._lock:
+                        if self._cancelled.is_set():
+                            raise AuthenticationCancelled(
+                                "authentication request was cancelled"
+                            )
+                        self._active_connection = connection
                     try:
                         server_handshake(
                             connection,
@@ -89,22 +105,41 @@ class AuthChallengeServer:
                             expected_role="auth",
                             timeout=max(0, self._deadline - time.monotonic()),
                         )
+                        with self._lock:
+                            if self._authenticated:
+                                raise AuthenticationReplayError(
+                                    "authentication request was already authenticated"
+                                )
+                            self._authenticated = True
+                        return self._receive_response(connection)
                     except IpcTimeout as error:
-                        raise AuthenticationTimedOut("authentication window timed out") from error
+                        raise AuthenticationTimedOut(
+                            "authentication window timed out"
+                        ) from error
                     except IpcError:
+                        if self._cancelled.is_set():
+                            raise AuthenticationCancelled(
+                                "authentication request was cancelled"
+                            ) from None
                         continue
-                    with self._lock:
-                        if self._authenticated:
-                            raise AuthenticationReplayError(
-                                "authentication request was already authenticated"
-                            )
-                        self._authenticated = True
-                    return self._receive_response(connection)
+                    finally:
+                        with self._lock:
+                            if self._active_connection is connection:
+                                self._active_connection = None
             raise AuthenticationTimedOut("authentication window timed out")
         finally:
             self.listener.close()
 
     def close(self) -> None:
+        self.listener.close()
+
+    def cancel(self) -> None:
+        self._cancelled.set()
+        with self._lock:
+            connection = self._active_connection
+        if connection is not None:
+            connection.close()
+        self._wake_accept()
         self.listener.close()
 
     def _receive_response(self, connection: PipeConnection) -> AuthResponse:

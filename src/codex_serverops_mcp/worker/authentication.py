@@ -40,8 +40,13 @@ class AuthenticationCoordinator(Protocol):
 
     def respond(self, event: PromptEvent, sink: SecretInputSink) -> None: ...
 
+    def cancel_active(self) -> None: ...
+
 
 class UnavailableAuthenticationCoordinator:
     def respond(self, event: PromptEvent, sink: SecretInputSink) -> None:
         del event, sink
         raise AuthenticationUnavailable("no local authentication coordinator is configured")
+
+    def cancel_active(self) -> None:
+        return

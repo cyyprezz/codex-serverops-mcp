@@ -22,6 +22,18 @@ and the original command is represented by SHA-256. Output and structured file c
 passed to the logger. Tool responses state whether the event was written and whether its command
 preview was redacted or truncated.
 
+## Current-product amendment
+
+The same protected logger now records local profile and setup lifecycle actions. Its allowlist is
+limited to profile name, result status, connection/authentication modes, environment label,
+terminal/file capability flags, elevation mode and root-session flag. It excludes full host/IP,
+full key paths, public-key lines, configuration content and secrets. The covered action families
+are profile create/update/remove/test, key generation and public-key installation, including
+failure and unknown-outcome events.
+
+As with remote actions, an audit append failure is reported as `audit.logged = false` and does not
+falsely turn a successful local mutation into a failure.
+
 ## Consequences
 
 - Authentication input cannot enter audit through an MCP or broker field.

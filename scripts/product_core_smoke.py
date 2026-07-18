@@ -374,9 +374,9 @@ def run(project_root: Path) -> dict[str, object]:
         if "terminal-smoke" not in terminal_output:
             raise AssertionError("raw terminal output was not readable")
         services.server_terminal("close", session_id)
-        reconnected = services.server_connection("reconnect", session_id=session_id)
-        if not reconnected["reconnected"] or reconnected["command_retried"]:
-            raise AssertionError("MCP-style reconnect contract is invalid")
+        rediscovered = services.server_connection("rediscover", session_id=session_id)
+        if not rediscovered["rediscovered"] or rediscovered["command_retried"]:
+            raise AssertionError("MCP session rediscovery contract is invalid")
         services.server_connection("close", session_id=session_id)
         session_id = None
         audit_text = "".join(
@@ -428,7 +428,7 @@ def run(project_root: Path) -> dict[str, object]:
                 "sudo_elevated_exec",
                 "dedicated_root_session",
                 "raw_terminal",
-                "mcp_reconnect_without_retry",
+                "mcp_rediscovery_without_retry",
             ],
         }
     finally:

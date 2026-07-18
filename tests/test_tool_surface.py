@@ -89,7 +89,7 @@ class CoreToolSurfaceTests(unittest.TestCase):
         )
         self.assertEqual(
             self.tools["server_connection"].inputSchema["properties"]["action"]["enum"],
-            ["open", "status", "list", "reconnect", "close"],
+            ["open", "status", "list", "rediscover", "close"],
         )
         self.assertEqual(
             self.tools["server_terminal"].inputSchema["properties"]["action"]["enum"],

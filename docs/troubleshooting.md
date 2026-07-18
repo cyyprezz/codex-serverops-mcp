@@ -35,7 +35,19 @@ new STDIO servers only when starting a session.
 - Repeated sudo-password prompts: call elevation `status`, acquire once when inactive, reuse that
   timestamp for the operation sequence and call `release` afterward. Do not acquire/release around
   every command.
-- `outcome_unknown`: reconnect and inspect server state. Never repeat the command automatically.
+- `session_lost` or shell-health failure: `exit`, `logout`, `exec`, disabled required builtins or
+  other destructive shell changes can make the original Bash unverifiable. Open a new session;
+  do not treat the old session as ready.
+- `outcome_unknown`: inspect server state through a new session or independent SSH connection
+  before deciding what to do. `rediscover` may find broker metadata, but it never repairs a lost
+  SSH connection or retries the command.
+- Public-key transition failure: inspect `local_profile_rollback_status`. Even after
+  `rolled_back`, the public key may already be present in remote `authorized_keys`. With
+  `outcome_unknown`, neither `public_key_installed` nor `public_key_was_new` is known. ServerOps
+  never removes the remote key automatically; review the remote account before retrying or
+  removing it.
+- `audit.logged = false`: the profile or remote operation retains its reported result, but the
+  protected local audit append failed. Repair local storage/DACLs before relying on audit coverage.
 
 For local development wheels, `python_unsupported` means the managed block did not use Python
 3.12. Regenerate it with both `--development-wheel` and `--development-python` rather than editing

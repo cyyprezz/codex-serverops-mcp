@@ -2,12 +2,18 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from contextlib import suppress
 
-from codex_serverops_mcp.ssh.framing import CommandFrameParser, command_wrapper, new_token
+from codex_serverops_mcp.ssh.framing import (
+    CommandFrameParser,
+    FrameProtocolError,
+    command_wrapper,
+    new_token,
+)
 from codex_serverops_mcp.terminal.contracts import TerminalProcess
 
 from .control import REMOTE_VINTR_BYTE
-from .errors import SessionError, SessionLost
+from .errors import OutcomeUnknown, SessionLost
 from .result import InteractiveRead, InteractiveStatus
 from .state import SessionState, SessionStateMachine
 
@@ -22,10 +28,13 @@ class InteractiveTerminalController:
         terminal: TerminalProcess,
         state: SessionStateMachine,
         read_and_handle_prompts: Callable[[float], bytes],
+        *,
+        shell_nonce: str,
     ) -> None:
         self._terminal = terminal
         self._state = state
         self._read_and_handle_prompts = read_and_handle_prompts
+        self._shell_nonce = shell_nonce
 
     def start(self, command: str) -> InteractiveStatus:
         if not command or "\x00" in command:
@@ -91,20 +100,50 @@ class InteractiveTerminalController:
         self._terminal.write(REMOTE_VINTR_BYTE)
         time.sleep(0.2)
         token = new_token()
-        parser = CommandFrameParser(token, max_output_bytes=4_096)
-        self._terminal.write(command_wrapper(":", token).encode("utf-8"))
+        parser = CommandFrameParser(
+            token,
+            max_output_bytes=4_096,
+            shell_nonce=self._shell_nonce,
+        )
+        self._terminal.write(
+            command_wrapper(":", token, shell_nonce=self._shell_nonce).encode("utf-8")
+        )
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             data = self._read_and_handle_prompts(min(0.25, deadline - time.monotonic()))
-            if data and parser.feed(data) is not None:
-                self._state.transition(SessionState.READY)
-                return InteractiveStatus(
-                    state=self._state.state,
-                    running=self._terminal.running,
-                    output_cursor=self._terminal.output_cursor,
-                )
+            if data:
+                try:
+                    result = parser.feed(data)
+                except FrameProtocolError as error:
+                    self._lose_session()
+                    raise OutcomeUnknown(
+                        "Interactive shell recovery framing was invalid; the session was lost."
+                    ) from error
+                if result is not None:
+                    if not self._terminal.running:
+                        self._lose_session()
+                        raise OutcomeUnknown(
+                            "The shell ended during interactive recovery; the session was lost."
+                        )
+                    self._state.transition(SessionState.READY)
+                    return InteractiveStatus(
+                        state=self._state.state,
+                        running=True,
+                        output_cursor=self._terminal.output_cursor,
+                    )
             if not self._terminal.running:
-                self._state.transition(SessionState.LOST)
-                raise SessionLost("the SSH terminal closed while leaving interactive mode")
-        self._state.transition(SessionState.FAILED)
-        raise SessionError("interactive process did not return control to Bash")
+                self._lose_session()
+                raise OutcomeUnknown(
+                    "The SSH terminal closed before interactive recovery was verified."
+                )
+        self._lose_session()
+        raise OutcomeUnknown(
+            "Interactive control did not return to the original Bash shell; the session was lost."
+        )
+
+    def _lose_session(self) -> None:
+        if self._state.state is SessionState.INTERACTIVE:
+            self._state.transition(SessionState.LOST)
+        if self._terminal.running:
+            with suppress(Exception):
+                self._terminal.terminate()

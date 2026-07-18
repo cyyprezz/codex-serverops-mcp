@@ -8,9 +8,12 @@ from contextlib import suppress
 from pathlib import Path
 
 from codex_serverops_mcp.application import ApplicationServices
-from codex_serverops_mcp.broker.client import BrokerClient
-from codex_serverops_mcp.broker.errors import BrokerUnavailable
 from codex_serverops_mcp.setup.keys import read_public_key, validate_public_key_line
+
+if __package__:
+    from ._external_runtime import isolated_external_services
+else:
+    from _external_runtime import isolated_external_services
 
 REMOVED_MARKER = "serverops-test-key-removed"
 
@@ -51,7 +54,15 @@ def run(profile_name: str, public_key_path: Path) -> dict[str, object]:
         raise ValueError("external cleanup requires an explicit test profile")
     public_key = read_public_key(public_key_path.resolve())
     command = build_authorized_key_removal_command(public_key)
-    services = ApplicationServices.create()
+    with isolated_external_services() as services:
+        return _run(profile_name, command, services)
+
+
+def _run(
+    profile_name: str,
+    command: str,
+    services: ApplicationServices,
+) -> dict[str, object]:
     session_id: str | None = None
     try:
         opened = services.server_connection("open", profile_name=profile_name)
@@ -75,17 +86,6 @@ def run(profile_name: str, public_key_path: Path) -> dict[str, object]:
         if session_id is not None:
             with suppress(Exception):
                 services.server_connection("close", session_id=session_id)
-        _shutdown_idle_broker()
-
-
-def _shutdown_idle_broker() -> None:
-    try:
-        with BrokerClient() as client:
-            if client.request("session.list").get("sessions"):
-                return
-            client.request("broker.shutdown")
-    except BrokerUnavailable:
-        pass
 
 
 def main() -> None:

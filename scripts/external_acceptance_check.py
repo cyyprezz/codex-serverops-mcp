@@ -12,6 +12,11 @@ from codex_serverops_mcp.broker.errors import BrokerRemoteError
 from codex_serverops_mcp.config import ElevationMode, ServerProfile
 from codex_serverops_mcp.security import default_audit_path
 
+if __package__:
+    from ._external_runtime import isolated_external_services
+else:
+    from _external_runtime import isolated_external_services
+
 
 def validate_acceptance_profile(profile: ServerProfile, expected_root: str) -> None:
     if profile.environment != "test":
@@ -29,7 +34,15 @@ def validate_acceptance_profile(profile: ServerProfile, expected_root: str) -> N
 
 
 def run(profile_name: str, expected_root: str) -> dict[str, object]:
-    services = ApplicationServices.create()
+    with isolated_external_services() as services:
+        return _run(profile_name, expected_root, services)
+
+
+def _run(
+    profile_name: str,
+    expected_root: str,
+    services: ApplicationServices,
+) -> dict[str, object]:
     snapshot = services.profiles.load()
     try:
         profile = snapshot.config.profiles[profile_name]
@@ -191,11 +204,11 @@ def run(profile_name: str, expected_root: str) -> dict[str, object]:
         root_session_id = None
         checks.append("dedicated_root_session")
 
-        reconnected = services.server_connection("reconnect", session_id=session_id)
+        rediscovered = services.server_connection("rediscover", session_id=session_id)
         _expect(
-            reconnected.get("reconnected") is True
-            and reconnected.get("command_retried") is False,
-            "reconnect contract was not explicit about no retry",
+            rediscovered.get("rediscovered") is True
+            and rediscovered.get("command_retried") is False,
+            "rediscovery contract was not explicit about no retry",
         )
         checks.append("broker_session_rediscovery_no_retry")
 

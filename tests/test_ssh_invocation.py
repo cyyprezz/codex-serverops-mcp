@@ -34,7 +34,7 @@ class SshInvocationTests(unittest.TestCase):
         self.assertIn("deploy", arguments)
         self.assertEqual(
             arguments[-6:],
-            ["--", "192.0.2.10", "bash", "--noprofile", "--norc", "-i"],
+            ["--", "192.0.2.10", "/bin/bash", "--noprofile", "--norc", "-i"],
         )
         self.assertNotIn("192.0.2.10 deploy", arguments)
 
@@ -54,7 +54,10 @@ class SshInvocationTests(unittest.TestCase):
 
         self.assertNotIn("-l", arguments)
         self.assertNotIn("-p", arguments)
-        self.assertEqual(arguments[-6:], ["--", "corp-prod", "bash", "--noprofile", "--norc", "-i"])
+        self.assertEqual(
+            arguments[-6:],
+            ["--", "corp-prod", "/bin/bash", "--noprofile", "--norc", "-i"],
+        )
 
     def test_root_session_is_a_separate_non_interactive_sudo_login_bash(self) -> None:
         profile = ServerProfile(
@@ -75,21 +78,60 @@ class SshInvocationTests(unittest.TestCase):
             root_session=True,
         )
 
-        self.assertEqual(
-            arguments[-10:],
-            [
+        expected = [
                 "--",
                 "192.0.2.10",
-                "sudo",
+                "/usr/bin/sudo",
                 "-n",
                 "-i",
                 "--",
-                "bash",
+                "/usr/bin/env",
+                "-u",
+                "BASH_ENV",
+                "-u",
+                "ENV",
+                "-u",
+                "SHELLOPTS",
+                "-u",
+                "BASHOPTS",
+                "/bin/bash",
                 "--noprofile",
                 "--norc",
                 "-i",
-            ],
+        ]
+        self.assertEqual(arguments[-len(expected) :], expected)
+
+    def test_interactive_root_session_requires_operation_bound_sudo_prompt(self) -> None:
+        profile = ServerProfile(
+            display_name="Root",
+            connection_type=ConnectionType.DIRECT,
+            authentication=Authentication.OPENSSH,
+            host="192.0.2.10",
+            port=22,
+            user="deploy",
+            elevation_mode=ElevationMode.INTERACTIVE,
+            allow_root_session=True,
         )
+
+        with self.assertRaisesRegex(ValueError, "operation-bound sudo prompt"):
+            build_ssh_arguments(
+                profile,
+                ssh_executable=Path("ssh.exe"),
+                known_hosts_file=Path("known_hosts"),
+                root_session=True,
+            )
+
+        prompt = "[sudo] password for %u: serverops-root-operation-token"
+        arguments = build_ssh_arguments(
+            profile,
+            ssh_executable=Path("ssh.exe"),
+            known_hosts_file=Path("known_hosts"),
+            root_session=True,
+            root_sudo_prompt=prompt,
+        )
+
+        self.assertIn("-p", arguments)
+        self.assertIn(prompt, arguments)
 
 
 if __name__ == "__main__":

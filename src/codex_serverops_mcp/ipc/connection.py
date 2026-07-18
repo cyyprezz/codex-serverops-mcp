@@ -26,6 +26,7 @@ class PipeConnection:
         self._handle = handle
         self._server_side = server_side
         self._write_lock = threading.Lock()
+        self._close_lock = threading.Lock()
         self._closed = False
 
     def send(self, envelope: Envelope, *, max_bytes: int = MAX_IPC_MESSAGE_BYTES) -> None:
@@ -95,11 +96,12 @@ class PipeConnection:
             raise
 
     def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        handle = self._handle
-        self._handle = None
+        with self._close_lock:
+            if self._closed:
+                return
+            self._closed = True
+            handle = self._handle
+            self._handle = None
         if handle is None:
             return
         if self._server_side:

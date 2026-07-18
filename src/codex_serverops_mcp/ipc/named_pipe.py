@@ -65,17 +65,22 @@ class NamedPipeListener:
                     if error.winerror != PIPE_CONNECTED:
                         raise
                 require_current_user_only(handle)
+                with self._lock:
+                    if self._closed or self._connecting is not handle:
+                        raise IpcClosed("named-pipe listener closed during accept")
+                    # Transfer handle ownership to the returned connection before
+                    # close() can observe it as listener-owned.
+                    self._connecting = None
                 return PipeConnection(handle, server_side=True)
             except BaseException:
                 with self._lock:
                     was_closed = self._closed
-                if not was_closed:
+                    listener_owns_handle = self._connecting is handle
+                    if listener_owns_handle:
+                        self._connecting = None
+                if listener_owns_handle and not was_closed:
                     win32file.CloseHandle(handle)
                 raise
-            finally:
-                with self._lock:
-                    if self._connecting is handle:
-                        self._connecting = None
 
     def close(self) -> None:
         with self._lock:

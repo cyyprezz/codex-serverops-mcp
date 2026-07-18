@@ -1,7 +1,7 @@
 # MCP tool reference
 
-The current development package exposes exactly eight tools. This is the intended public tool
-shape, but the package remains `0.0.0.dev1` until the stable release gates are complete.
+The untagged `0.1.0` candidate exposes exactly eight tools. This is the intended public tool
+shape, but it is not a published release until the stable evidence, merge and tag gates complete.
 
 ## `server_profiles`
 
@@ -28,7 +28,9 @@ directory. `status` requires `request_id`; `wait` additionally accepts a bounded
 The local assistant performs the confirmation and any profile mutation. A key-creation
 passphrase, login password, key passphrase or host-key answer never becomes an MCP parameter or
 setup result. Completed non-secret statuses are `created`, `updated`, `removed` and `tested`;
-cancel, expiry and failures are controlled terminal results.
+cancel, expiry and failures are controlled terminal results. Profile mutations, tests, key
+generation and public-key installation also report `audit.logged`; an audit-write failure does not
+change the operation's real result.
 
 ## `server_connection`
 
@@ -38,13 +40,23 @@ Actions:
   worker and opens its held Bash session.
 - `status` requires `session_id` and queries the owning worker.
 - `list` returns broker-owned session metadata.
-- `reconnect` requires `session_id`, rediscovers the existing worker and explicitly returns
-  `command_retried = false`.
+- `rediscover` requires `session_id`, returns the existing broker-owned worker and explicitly
+  returns `command_retried = false`. It does not repair a lost SSH connection or create a new
+  session.
 - `close` requires `session_id` and closes only that worker/session.
 
-Opening a connection may cause `serverops-auth` to appear locally. The host-key window includes
-the OpenSSH algorithm and fingerprint. Auth input never becomes an MCP parameter or broker
-message, and output from a later command cannot open this window.
+Opening a connection may cause `serverops-auth` to appear locally. OpenSSH first invokes that
+existing entry point in Askpass-helper mode; a SID-only/HMAC worker relay verifies the invocation
+and the selected profile policy before the worker opens the visible DirectAuth window. A host-key
+window contains the complete bounded OpenSSH notice, including algorithm and SHA-256 fingerprint.
+
+A direct password profile can request only an account password, while a direct OpenSSH/key profile
+can request only a key passphrase. An SSH alias follows OpenSSH configuration and may request
+either, but the worker supplies at most one host-key answer and one credential answer. No later
+connection prompt is accepted after the credential. Auth input never becomes an MCP parameter,
+broker message, environment value, process argument or audit event. See
+[`authentication.md`](authentication.md) and
+[ADR 015](adr/015-windows-openssh-askpass-boundary.md).
 
 ## `server_exec`
 
@@ -62,9 +74,12 @@ the held Bash shell and returns:
 }
 ```
 
-PTY output is combined and is not represented as separate stdout/stderr. A disconnect before
-the end frame remains `outcome_unknown`; neither reconnect nor any other layer retries it. A
-timeout can occur after remote side effects and is also never an automatic retry instruction.
+PTY output is combined and is not represented as separate stdout/stderr. Completion is accepted
+only after the strict result, working-directory and original-shell health records are verified and
+the terminal remains live. A disconnect or irrecoverable shell change before then remains
+`outcome_unknown`; neither `rediscover` nor any other layer repairs the connection or retries the
+command. A timeout can occur after remote side effects and is also never an automatic retry
+instruction.
 
 ## `server_terminal`
 
@@ -84,7 +99,8 @@ close      optional timeout
 the desired output appears. `dropped_before_cursor` reports bounded-buffer loss.
 The `start` command receives the same redacted preview/hash audit treatment as `server_exec`.
 Arbitrary `write` input is never logged as command text. Credential-looking terminal output never
-opens a local authentication dialog.
+has OpenSSH Askpass provenance and cannot open a connection-authentication dialog. Ordinary raw
+terminal use also cannot authorize the sudo dialog.
 
 ## `server_files`
 
@@ -144,8 +160,10 @@ and fails rather than falling back to a prompt. `release` invalidates the remote
 `open_root_session` creates a second worker and a second OpenSSH connection running a dedicated
 root Bash. It returns that root session's own ID and its parent normal-session ID. Closing the
 normal session does not implicitly adopt or merge the root shell; call `close_root_session` with
-the root session ID. Structured file tools are disabled in root sessions so they cannot silently
-create root-owned files. See [`elevation.md`](elevation.md).
+the root session ID. In interactive mode the worker binds startup sudo to a fresh random nonce in
+its custom `sudo -p` prompt; a fake banner without that nonce is ignored. Structured file tools
+are disabled in root sessions so they cannot silently create root-owned files. See
+[`elevation.md`](elevation.md).
 
 ## Tool annotations
 

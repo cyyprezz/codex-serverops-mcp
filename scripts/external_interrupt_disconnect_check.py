@@ -9,13 +9,20 @@ import time
 from contextlib import suppress
 
 from codex_serverops_mcp.application import ApplicationServices
-from codex_serverops_mcp.broker.client import BrokerClient
-from codex_serverops_mcp.broker.errors import BrokerRemoteError, BrokerUnavailable
+from codex_serverops_mcp.broker.errors import BrokerRemoteError
+
+if __package__:
+    from ._external_runtime import isolated_external_services
+else:
+    from _external_runtime import isolated_external_services
 
 TOKEN = re.compile(r"^[a-f0-9]{12}$")
 UNIT = re.compile(r"^serverops-cut-[a-f0-9]{12}$")
 INTERRUPT_MARKER = "serverops-interrupt-started"
 AFTER_INTERRUPT_MARKER = "serverops-after-interrupt"
+SCHEDULER_COMMAND_TIMEOUT_SECONDS = 15
+FIREWALL_CLEANUP_TIMEOUT_SECONDS = 35
+FIREWALL_CLEANUP_POLL_SECONDS = 1
 NETWORK_COMMAND = (
     "i=0; while [ \"$i\" -lt 60 ]; do "
     "printf 'serverops-network-probe-%s\\n' \"$i\"; "
@@ -41,7 +48,7 @@ def build_firewall_schedule_command(token: str) -> str:
         "test \"$#\" -eq 4; "
         "case \"$1$3\" in ''|*[!0-9.]*) exit 91;; esac; "
         "case \"$2$4\" in ''|*[!0-9]*) exit 92;; esac; "
-        "sudo -n systemd-run --quiet --collect "
+        "sudo -n systemd-run --quiet --no-block --collect "
         f"--unit=serverops-cut-{token} --on-active=5s "
         "--timer-property=AccuracySec=100ms --property=RuntimeMaxSec=25s -- "
         f"/bin/bash -c {shlex.quote(root_script)} serverops-cut "
@@ -53,7 +60,14 @@ def build_firewall_schedule_command(token: str) -> str:
 def run(profile_name: str) -> dict[str, object]:
     if not profile_name.endswith("-test"):
         raise ValueError("interrupt/disconnect check requires an explicit test profile")
-    services = ApplicationServices.create()
+    with isolated_external_services() as services:
+        return _run(profile_name, services)
+
+
+def _run(
+    profile_name: str,
+    services: ApplicationServices,
+) -> dict[str, object]:
     session_id: str | None = None
     checks: list[str] = []
     try:
@@ -73,36 +87,26 @@ def run(profile_name: str) -> dict[str, object]:
         _expect(ufw_line in {"status: active", "status: inactive"}, "UFW status was invalid")
         checks.append(f"ufw_{ufw_line.removeprefix('status: ')}")
 
-        scheduled = services.server_exec(
+        token = secrets.token_hex(6)
+        unit = f"serverops-cut-{token}"
+        disconnect_stage = _trigger_connection_reset(
+            services,
             session_id,
-            build_firewall_schedule_command(secrets.token_hex(6)),
+            build_firewall_schedule_command(token),
         )
+        checks.append(f"connection_reset_during_{disconnect_stage}")
+        rediscovery = services.server_connection("rediscover", session_id=session_id)
         _expect(
-            scheduled.get("status") == "completed"
-            and scheduled.get("exit_code") == 0
-            and str(scheduled.get("output", "")).strip() == "scheduled",
-            "self-reverting connection-specific firewall unit was not scheduled",
-        )
-        checks.append("connection_specific_self_reverting_rule_scheduled")
-
-        try:
-            services.server_exec(session_id, NETWORK_COMMAND, timeout=30)
-        except BrokerRemoteError as error:
-            _expect(error.code == "outcome_unknown", "disconnect returned the wrong error code")
-        else:
-            raise AssertionError("network command completed despite the scheduled connection reset")
-        reconnect = services.server_connection("reconnect", session_id=session_id)
-        _expect(
-            reconnect.get("state") == "lost"
-            and reconnect.get("reconnected") is True
-            and reconnect.get("command_retried") is False,
-            "lost-session reconnect did not preserve the no-retry contract",
+            rediscovery.get("state") == "lost"
+            and rediscovery.get("rediscovered") is True
+            and rediscovery.get("command_retried") is False,
+            "lost-session rediscovery did not preserve the no-retry contract",
         )
         checks.append("outcome_unknown_lost_and_command_not_retried")
         services.server_connection("close", session_id=session_id)
         session_id = None
-        time.sleep(12)
-        checks.append("firewall_cleanup_window_elapsed")
+        _verify_firewall_cleanup(services, profile_name, unit)
+        checks.append("firewall_cleanup_confirmed")
         return {
             "status": "passed",
             "profile": profile_name,
@@ -115,13 +119,20 @@ def run(profile_name: str) -> dict[str, object]:
                 services.server_elevation("release", session_id)
             with suppress(Exception):
                 services.server_connection("close", session_id=session_id)
-        _shutdown_idle_broker()
 
 
 def diagnose_unit(profile_name: str, unit: str) -> dict[str, object]:
     if not profile_name.endswith("-test") or not UNIT.fullmatch(unit):
         raise ValueError("unit diagnosis requires an exact test profile and unit name")
-    services = ApplicationServices.create()
+    with isolated_external_services() as services:
+        return _diagnose_unit(profile_name, unit, services)
+
+
+def _diagnose_unit(
+    profile_name: str,
+    unit: str,
+    services: ApplicationServices,
+) -> dict[str, object]:
     session_id: str | None = None
     try:
         opened = services.server_connection("open", profile_name=profile_name)
@@ -148,7 +159,6 @@ def diagnose_unit(profile_name: str, unit: str) -> dict[str, object]:
                 services.server_elevation("release", session_id)
             with suppress(Exception):
                 services.server_connection("close", session_id=session_id)
-        _shutdown_idle_broker()
 
 
 def ensure_elevation(
@@ -159,6 +169,73 @@ def ensure_elevation(
     if status.get("active") is True:
         return status
     return services.server_elevation("acquire", session_id)
+
+
+def _trigger_connection_reset(
+    services: ApplicationServices,
+    session_id: str,
+    schedule_command: str,
+) -> str:
+    try:
+        scheduled = services.server_exec(
+            session_id,
+            schedule_command,
+            timeout=SCHEDULER_COMMAND_TIMEOUT_SECONDS,
+        )
+    except BrokerRemoteError as error:
+        _expect(error.code == "outcome_unknown", "disconnect returned the wrong error code")
+        return "scheduler_command"
+    _expect(
+        scheduled.get("status") == "completed"
+        and scheduled.get("exit_code") == 0
+        and str(scheduled.get("output", "")).strip() == "scheduled",
+        "self-reverting connection-specific firewall unit was not scheduled",
+    )
+    try:
+        services.server_exec(session_id, NETWORK_COMMAND, timeout=30)
+    except BrokerRemoteError as error:
+        _expect(error.code == "outcome_unknown", "disconnect returned the wrong error code")
+        return "network_probe"
+    raise AssertionError("network command completed despite the scheduled connection reset")
+
+
+def _verify_firewall_cleanup(
+    services: ApplicationServices,
+    profile_name: str,
+    unit: str,
+) -> None:
+    if not UNIT.fullmatch(unit):
+        raise ValueError("firewall cleanup requires an exact test unit name")
+    session_id: str | None = None
+    try:
+        opened = services.server_connection("open", profile_name=profile_name)
+        session_id = str(opened["session_id"])
+        quoted = shlex.quote(unit)
+        command = (
+            f"systemctl list-units {quoted}.service {quoted}.timer "
+            "--all --no-legend --no-pager; "
+            f"systemctl list-timers {quoted}.timer --all --no-legend --no-pager"
+        )
+        deadline = time.monotonic() + FIREWALL_CLEANUP_TIMEOUT_SECONDS
+        while True:
+            result = services.server_exec(session_id, command)
+            _expect(
+                result.get("exit_code") == 0,
+                "firewall cleanup inspection did not complete",
+            )
+            remaining = str(result.get("output", "")).strip()
+            if not remaining:
+                return
+            if time.monotonic() >= deadline:
+                raise AssertionError(
+                    "self-reverting firewall unit or timer remained after cleanup: "
+                    f"{remaining!r}"
+                )
+            time.sleep(FIREWALL_CLEANUP_POLL_SECONDS)
+    finally:
+        if session_id is not None:
+            with suppress(Exception):
+                services.server_connection("close", session_id=session_id)
 
 
 def _check_real_interrupt(services: ApplicationServices, session_id: str) -> None:
@@ -180,19 +257,13 @@ def _check_real_interrupt(services: ApplicationServices, session_id: str) -> Non
     _expect(closed.get("state") == "ready", "Ctrl+C did not restore the ready shell")
     after = services.server_exec(session_id, f"printf '{AFTER_INTERRUPT_MARKER}'")
     _expect(
-        after.get("exit_code") == 0 and after.get("output") == AFTER_INTERRUPT_MARKER,
+        _output_matches_marker(after, AFTER_INTERRUPT_MARKER),
         "same shell did not execute after Ctrl+C",
     )
 
 
-def _shutdown_idle_broker() -> None:
-    try:
-        with BrokerClient() as client:
-            if client.request("session.list").get("sessions"):
-                return
-            client.request("broker.shutdown")
-    except BrokerUnavailable:
-        pass
+def _output_matches_marker(result: dict[str, object], marker: str) -> bool:
+    return result.get("exit_code") == 0 and str(result.get("output", "")).strip() == marker
 
 
 def _expect(condition: bool, message: str) -> None:

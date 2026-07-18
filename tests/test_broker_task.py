@@ -25,6 +25,7 @@ from codex_serverops_mcp.broker.task_scheduler import (
     TASK_TRIGGER_LOGON,
     BrokerTaskController,
     BrokerTaskError,
+    _account_matches,
 )
 
 
@@ -210,6 +211,35 @@ class BrokerTaskTests(unittest.TestCase):
         self.assertTrue(self.controller.inspect().running)
         self.assertTrue(self.controller.remove())
         self.assertFalse(self.controller.inspect().exists)
+
+    def test_task_scheduler_account_normalization_is_verified_by_sid(self) -> None:
+        with (
+            patch(
+                "codex_serverops_mcp.broker.task_scheduler.win32security.LookupAccountName",
+                return_value=(object(), "EXAMPLE", 1),
+            ),
+            patch(
+                "codex_serverops_mcp.broker.task_scheduler.win32security."
+                "ConvertSidToStringSid",
+                return_value="S-1-5-21-current",
+            ),
+        ):
+            self.assertTrue(
+                _account_matches(
+                    "operator",
+                    "EXAMPLE\\operator",
+                    "S-1-5-21-current",
+                )
+            )
+            self.assertFalse(
+                _account_matches(
+                    "operator",
+                    "EXAMPLE\\operator",
+                    "S-1-5-21-other",
+                )
+            )
+
+        self.assertFalse(_account_matches("operator", "EXAMPLE\\operator", None))
 
     def test_refuses_to_replace_or_remove_unmanaged_name_collision(self) -> None:
         definition = _definition()

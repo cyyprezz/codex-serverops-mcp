@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import secrets
 from collections.abc import Callable, Mapping
 from contextlib import suppress
 from pathlib import Path
@@ -17,9 +18,12 @@ from codex_serverops_mcp.errors import ConfigurationError
 from codex_serverops_mcp.files import RemoteFileService
 from codex_serverops_mcp.files.errors import RemoteFileError
 from codex_serverops_mcp.ipc.security import secure_path_for_current_user
+from codex_serverops_mcp.ssh.auth_policy import ConnectionPromptPolicy
 from codex_serverops_mcp.ssh.invocation import build_ssh_arguments
+from codex_serverops_mcp.ssh.prompts import operation_sudo_prompt
 from codex_serverops_mcp.ssh.target import ResolvedSshTarget, find_windows_ssh, resolve_ssh_target
 
+from .askpass import OpenSshAskpassRelay
 from .errors import SessionError
 from .result import InteractiveStatus
 from .session import StatefulSshSession
@@ -29,6 +33,9 @@ from .visible_auth import VisibleAuthenticationCoordinator
 SESSION_OPEN_TIMEOUT_SECONDS = 180
 
 SessionFactory = Callable[[ServerProfile, AuthTargetContext], StatefulSshSession]
+AskpassRelayFactory = Callable[
+    [ServerProfile, AuthTargetContext, StatefulSshSession], OpenSshAskpassRelay
+]
 
 
 class WorkerSessionService:
@@ -40,6 +47,7 @@ class WorkerSessionService:
         ssh_finder: Callable[[], Path] = find_windows_ssh,
         target_resolver: Callable[[ServerProfile, Path], ResolvedSshTarget] = resolve_ssh_target,
         session_factory: SessionFactory | None = None,
+        askpass_relay_factory: AskpassRelayFactory | None = None,
         known_hosts_path: Path | None = None,
         root_session: bool = False,
     ) -> None:
@@ -48,6 +56,7 @@ class WorkerSessionService:
         self.ssh_finder = ssh_finder
         self.target_resolver = target_resolver
         self.session_factory = session_factory or self._create_session
+        self.askpass_relay_factory = askpass_relay_factory or self._create_askpass_relay
         self.known_hosts_path = known_hosts_path or (
             default_config_path().parent / "known_hosts"
         )
@@ -81,23 +90,43 @@ class WorkerSessionService:
             target.user,
         )
         session = self.session_factory(profile, auth_target)
+        relay = self.askpass_relay_factory(profile, auth_target, session)
+        root_sudo_token = (
+            secrets.token_hex(16)
+            if self.root_session and profile.elevation_mode is ElevationMode.INTERACTIVE
+            else None
+        )
+        root_sudo_prompt = (
+            None
+            if root_sudo_token is None
+            else operation_sudo_prompt("root", root_sudo_token)
+        )
         self.profile = profile
         self.target = target
         self.session = session
         try:
-            session.open(
-                build_ssh_arguments(
-                    profile,
-                    ssh_executable=ssh_executable,
-                    known_hosts_file=known_hosts,
-                    root_session=self.root_session,
-                ),
-                timeout=SESSION_OPEN_TIMEOUT_SECONDS,
-                allow_sudo_prompt=(
-                    self.root_session
-                    and profile.elevation_mode is ElevationMode.INTERACTIVE
-                ),
-            )
+            relay.start()
+            try:
+                session.open(
+                    build_ssh_arguments(
+                        profile,
+                        ssh_executable=ssh_executable,
+                        known_hosts_file=known_hosts,
+                        root_session=self.root_session,
+                        root_sudo_prompt=root_sudo_prompt,
+                    ),
+                    timeout=SESSION_OPEN_TIMEOUT_SECONDS,
+                    allow_sudo_prompt=(
+                        self.root_session
+                        and profile.elevation_mode is ElevationMode.INTERACTIVE
+                    ),
+                    sudo_prompt_token=root_sudo_token,
+                    environment=relay.environment,
+                    failure_check=relay.check,
+                )
+                relay.check()
+            finally:
+                relay.close()
             if self.root_session:
                 verification = session.execute(
                     "id -u",
@@ -151,16 +180,16 @@ class WorkerSessionService:
                 "guided sudo actions are unavailable inside a root session",
             )
         assert self.target is not None
-        allow_sudo_prompt = (
-            profile.elevation_mode is ElevationMode.INTERACTIVE
-            and action in {"acquire", "exec"}
-        )
-
-        def run_elevation(command: str, timeout: float | None) -> dict[str, object]:
+        def run_elevation(
+            command: str,
+            timeout: float | None,
+            sudo_prompt_token: str | None,
+        ) -> dict[str, object]:
             return self._execute_internal(
                 command,
                 timeout,
-                allow_sudo_prompt=allow_sudo_prompt,
+                allow_sudo_prompt=sudo_prompt_token is not None,
+                sudo_prompt_token=sudo_prompt_token,
             )
 
         return ElevationService(profile, self.target.user, run_elevation).handle(action, payload)
@@ -171,6 +200,7 @@ class WorkerSessionService:
         timeout: float | None = None,
         *,
         allow_sudo_prompt: bool = False,
+        sudo_prompt_token: str | None = None,
     ) -> dict[str, object]:
         session, profile = self._open_session()
         session.state.require(SessionState.READY)
@@ -178,6 +208,7 @@ class WorkerSessionService:
             command,
             timeout=profile.command_timeout_seconds if timeout is None else timeout,
             allow_sudo_prompt=allow_sudo_prompt,
+            sudo_prompt_token=sudo_prompt_token,
         )
         self.cwd = result.cwd
         return {
@@ -264,6 +295,18 @@ class WorkerSessionService:
         return StatefulSshSession(
             authenticator=VisibleAuthenticationCoordinator(target),
             max_output_bytes=profile.max_output_bytes,
+        )
+
+    @staticmethod
+    def _create_askpass_relay(
+        profile: ServerProfile,
+        target: AuthTargetContext,
+        session: StatefulSshSession,
+    ) -> OpenSshAskpassRelay:
+        return OpenSshAskpassRelay(
+            target,
+            ConnectionPromptPolicy.from_profile(profile),
+            session.authenticator,
         )
 
     @staticmethod

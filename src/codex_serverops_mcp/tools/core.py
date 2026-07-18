@@ -69,7 +69,7 @@ def register_core_tools(server: FastMCP, services: ApplicationServices) -> None:
         structured_output=True,
     )
     def server_connection(
-        action: Literal["open", "status", "list", "reconnect", "close"],
+        action: Literal["open", "status", "list", "rediscover", "close"],
         profile_name: str | None = None,
         session_id: str | None = None,
     ) -> dict[str, object]:

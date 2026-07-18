@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import subprocess
 import threading
+import time
 import unittest
 
 from codex_serverops_mcp.auth.errors import (
@@ -185,6 +186,42 @@ class VisibleAuthenticationCoordinatorTests(unittest.TestCase):
                 SecretInputSink(lambda _data: None, newline=b"\r\n"),
             )
         self.assertIsNotNone(launcher.process)
+        assert launcher.process is not None
+        self.assertTrue(launcher.process.terminated)
+
+    def test_active_window_can_be_cancelled_from_the_owning_relay(self) -> None:
+        from codex_serverops_mcp.worker.visible_auth import VisibleAuthenticationCoordinator
+
+        launcher = SilentAuthLauncher()
+        coordinator = VisibleAuthenticationCoordinator(
+            self.target,
+            launcher=launcher,
+            timeout=10,
+        )
+        errors: list[BaseException] = []
+
+        def respond() -> None:
+            try:
+                coordinator.respond(
+                    PromptEvent(PromptKind.PASSWORD, "password:"),
+                    SecretInputSink(lambda _data: None, newline=b"\r\n"),
+                )
+            except BaseException as error:
+                errors.append(error)
+
+        thread = threading.Thread(target=respond)
+        thread.start()
+        deadline = time.monotonic() + 3
+        while launcher.process is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertIsNotNone(launcher.process)
+
+        coordinator.cancel_active()
+        thread.join(timeout=3)
+
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(len(errors), 1)
+        self.assertIsInstance(errors[0], AuthenticationCancelled)
         assert launcher.process is not None
         self.assertTrue(launcher.process.terminated)
 

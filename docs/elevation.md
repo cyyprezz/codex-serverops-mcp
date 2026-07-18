@@ -12,10 +12,29 @@ allowed to open the local sudo-password window. An unmanaged interactive `sudo` 
 until it is interrupted or times out. Elevation cannot grant a permission denied by the remote
 sudoers policy. Operators should use a restricted SSH account and narrow sudoers rules.
 
-Interactive sudo uses a deterministic prompt recognized by the existing authentication
-coordinator. A password is entered only in the separate visible local authentication process and
-travels over a one-use current-user pipe directly to the worker that owns OpenSSH. It is absent
-from the MCP schema, broker protocol, profile config, normal results and logs.
+Interactive sudo is not routed through OpenSSH Askpass because it occurs inside the established
+remote PTY. It is authorized only while an explicit `acquire` or elevation `exec` action is active.
+A fresh random operation token is embedded in that action's custom `sudo -p` text, and the worker
+accepts only the matching prompt. A function, changed `PATH`, prompt hook or ordinary output that
+merely resembles sudo therefore cannot receive the protected response. Guided operations invoke
+Ubuntu's `/usr/bin/sudo` directly; elevated Bash starts through absolute system programs with
+inherited Bash startup variables removed.
+A password is entered only in the separate visible local authentication process and travels over
+a one-use current-user DirectAuth pipe directly to the worker that owns OpenSSH. It is absent from
+the MCP schema, broker protocol, profile config, environment, process arguments, normal results
+and logs. Matching output during `server_exec` or raw-terminal use does not authorize the window.
+Time spent in that bounded local authentication window does not consume the remote command
+timeout. After a successful response, the remote sudo command still receives its configured
+timeout while the combined broker and Codex deadlines remain bounded.
+Each operation may open at most one local sudo window. If sudo requests the password again, the
+worker interrupts that command and returns a controlled failure; a timeout-recovery path never
+opens another authentication window.
+If an `acquire` command reaches its timeout after verified shell recovery, ServerOps performs one
+non-prompting `sudo -n -v` reconciliation. It reports success only when that probe confirms the
+requested active cache; an inactive or unverifiable cache preserves the original timeout failure.
+The local password-window duration remains excluded from command timing. After submission, the
+interactive `sudo -v` completion is bounded to five seconds before that safe reconciliation, so a
+missing PTY completion frame does not leave the operator waiting for the profile's full timeout.
 
 Non-interactive mode always passes `sudo -n`. It does not silently fall back to an interactive
 prompt. `status` also uses a non-prompting validation. `release` calls `sudo -k` to invalidate the
@@ -39,6 +58,11 @@ The command limit is 131072 UTF-8 bytes and timeout range is 0.1 through 3600 se
 response identifies `effective_user = root` and `elevated = true`. It intentionally omits `cwd`,
 because a one-shot elevated Bash does not change the held normal shell's directory.
 
+The held shell locks `PROMPT_COMMAND` and `PS0` through `PS4` as readonly empty values before any
+user command runs, and verifies them in every health record. Attempts to install those prompt
+hooks therefore fail without running them or allowing a later privileged operation to inherit
+ambiguous prompt behavior.
+
 ## Dedicated root session
 
 `open_root_session` starts a new worker, a new OpenSSH connection and `sudo -i` Bash. The worker
@@ -51,6 +75,12 @@ operations and further guided elevation. They must be explicitly closed with
 `close_root_session` and their own session ID. Sudo timestamp sharing differs across server
 configurations; non-interactive root-session startup therefore requires a valid existing policy
 or NOPASSWD rule rather than assuming a normal session's cache will be shared.
+
+For interactive root startup, the worker likewise generates a fresh random operation nonce and embeds it
+in a custom `sudo -p` prompt. Only a detected sudo prompt containing that nonce may reach
+DirectAuth. A remote banner that merely resembles `[sudo] password for ...` is ignored. This binds
+the startup prompt to that explicit root-session operation; server-side sudoers and PAM remain
+the authorization and challenge sources.
 
 ## Automated evidence and manual gate
 

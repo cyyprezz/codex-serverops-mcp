@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import os
 import threading
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 
 from codex_serverops_mcp.ssh.framing import (
     CommandFrameParser,
+    FrameProtocolError,
     command_wrapper,
     interrupt_recovery_wrapper,
     new_token,
+    shell_bootstrap_wrapper,
 )
 from codex_serverops_mcp.ssh.prompts import PromptDetector, PromptKind
 from codex_serverops_mcp.terminal.contracts import TerminalProcess
@@ -27,15 +30,8 @@ from .state import SessionState, SessionStateMachine
 
 COMMAND_INPUT_CHUNK_CHARACTERS = 512
 COMMAND_INPUT_FLOW_DELAY_SECONDS = 0.01
-SSH_CONNECTION_PROMPTS = frozenset(
-    {
-        PromptKind.HOST_KEY,
-        PromptKind.PASSWORD,
-        PromptKind.KEY_PASSPHRASE,
-    }
-)
-
-
+SHELL_BOOTSTRAP_TIMEOUT_SECONDS = 5.0
+RECOVERY_TIMEOUT_SECONDS = 5.0
 def _default_terminal(max_output_bytes: int) -> TerminalProcess:
     from codex_serverops_mcp.terminal.conpty import ConPtyProcess
 
@@ -61,10 +57,12 @@ class StatefulSshSession:
         self._cursor = 0
         self._active_token: str | None = None
         self._active_lock = threading.Lock()
+        self._shell_nonce = new_token()
         self.interactive = InteractiveTerminalController(
             self.terminal,
             self.state,
             self._read_and_handle_prompts,
+            shell_nonce=self._shell_nonce,
         )
 
     def open(
@@ -73,25 +71,52 @@ class StatefulSshSession:
         *,
         timeout: float = 20,
         allow_sudo_prompt: bool = False,
+        sudo_prompt_token: str | None = None,
+        environment: Mapping[str, str] | None = None,
+        failure_check: Callable[[], None] | None = None,
     ) -> None:
         self.state.require(SessionState.CREATED)
+        if allow_sudo_prompt != (sudo_prompt_token is not None):
+            raise ValueError(
+                "startup sudo authentication requires one operation-bound prompt token"
+            )
         self.state.transition(SessionState.STARTING)
         try:
-            self.terminal.start(ssh_arguments)
-            allowed_prompts = SSH_CONNECTION_PROMPTS
-            if allow_sudo_prompt:
-                allowed_prompts |= {PromptKind.SUDO_PASSWORD}
+            child_environment = dict(os.environ)
+            if environment is not None:
+                child_environment.update(environment)
+            try:
+                self.terminal.start(ssh_arguments, environment=child_environment)
+            finally:
+                child_environment.clear()
+            allowed_prompts = (
+                frozenset({PromptKind.SUDO_PASSWORD})
+                if allow_sudo_prompt
+                else frozenset()
+            )
+            authentication_starting = (
+                self._single_authentication_gate() if allowed_prompts else None
+            )
             deadline = time.monotonic() + timeout
             while time.monotonic() < deadline:
+                if failure_check is not None:
+                    failure_check()
                 self._read_and_handle_prompts(
                     min(0.25, deadline - time.monotonic()),
                     allowed_prompt_kinds=allowed_prompts,
+                    sudo_prompt_token=sudo_prompt_token,
+                    authentication_starting=authentication_starting,
                 )
                 if self._detector.ready:
-                    self.terminal.write(
-                        b"stty -echo intr '^]'; export PS1='' PS2='' PS3='' PS4=''\r\n"
+                    if failure_check is not None:
+                        failure_check()
+                    self._initialize_shell(
+                        timeout=min(
+                            SHELL_BOOTSTRAP_TIMEOUT_SECONDS,
+                            max(0.1, deadline - time.monotonic()),
+                        ),
+                        failure_check=failure_check,
                     )
-                    self._drain(0.2)
                     self.state.transition(SessionState.READY)
                     return
                 if not self.terminal.running:
@@ -113,31 +138,66 @@ class StatefulSshSession:
         *,
         timeout: float = 60,
         allow_sudo_prompt: bool = False,
+        sudo_prompt_token: str | None = None,
     ) -> ExecutionResult:
         if not command or "\x00" in command:
             raise ValueError("command must be non-empty text without NUL")
+        if allow_sudo_prompt != (sudo_prompt_token is not None):
+            raise ValueError(
+                "sudo authentication requires one operation-bound prompt token"
+            )
         self.state.require(SessionState.READY)
         token = new_token()
-        parser = CommandFrameParser(token, max_output_bytes=self.max_output_bytes)
+        parser = CommandFrameParser(
+            token,
+            max_output_bytes=self.max_output_bytes,
+            shell_nonce=self._shell_nonce,
+        )
         self._activate_command(token)
         self.state.transition(SessionState.EXECUTING)
         started = time.monotonic()
         try:
-            self._write_command(command_wrapper(command, token))
+            self._write_command(
+                command_wrapper(command, token, shell_nonce=self._shell_nonce)
+            )
             allowed_prompts = (
                 frozenset({PromptKind.SUDO_PASSWORD})
                 if allow_sudo_prompt
                 else frozenset()
             )
+            authentication_starting = (
+                self._single_authentication_gate() if allowed_prompts else None
+            )
             deadline = started + timeout
+
+            def preserve_remote_timeout(authentication_seconds: float) -> None:
+                nonlocal deadline
+                deadline += authentication_seconds
+
             while time.monotonic() < deadline:
                 data = self._read_and_handle_prompts(
                     min(0.25, deadline - time.monotonic()),
                     allowed_prompt_kinds=allowed_prompts,
+                    sudo_prompt_token=sudo_prompt_token,
+                    authentication_starting=authentication_starting,
+                    authentication_completed=preserve_remote_timeout,
                 )
                 if data:
-                    result = parser.feed(data)
+                    try:
+                        result = parser.feed(data)
+                    except FrameProtocolError as error:
+                        self._lose_executing_session()
+                        raise OutcomeUnknown(
+                            "Shell framing became invalid after command delivery; "
+                            "the command outcome is unknown."
+                        ) from error
                     if result is not None:
+                        if not self.terminal.running:
+                            self._lose_executing_session()
+                            raise OutcomeUnknown(
+                                "The shell ended after command delivery; the command outcome "
+                                "and reusable session state cannot be trusted."
+                            )
                         self.state.transition(SessionState.READY)
                         return ExecutionResult(
                             output=result.output,
@@ -147,30 +207,32 @@ class StatefulSshSession:
                             duration_ms=round((time.monotonic() - started) * 1_000),
                         )
                 if not self.terminal.running:
-                    final = parser.feed(b"", final=True)
-                    self.state.transition(SessionState.LOST)
-                    if final is not None:
-                        return ExecutionResult(
-                            output=final.output,
-                            exit_code=final.exit_code,
-                            cwd=final.cwd,
-                            truncated=final.truncated,
-                            duration_ms=round((time.monotonic() - started) * 1_000),
-                        )
+                    with suppress(FrameProtocolError):
+                        parser.feed(b"", final=True)
+                    self._lose_executing_session()
                     raise OutcomeUnknown(
                         "The connection ended before command completion could be verified."
                     )
             self._send_interrupt(token)
-            if self._wait_for_recovery(
-                parser,
-                timeout=5,
-                allowed_prompt_kinds=allowed_prompts,
-            ):
+            try:
+                recovered = self._wait_for_recovery(
+                    parser,
+                    timeout=RECOVERY_TIMEOUT_SECONDS,
+                )
+            except FrameProtocolError as error:
+                self._lose_executing_session()
+                raise OutcomeUnknown(
+                    "The command timed out and recovery framing was invalid; the outcome "
+                    "is unknown."
+                ) from error
+            if recovered and self.terminal.running:
                 self.state.transition(SessionState.READY)
-            else:
-                self.state.transition(SessionState.LOST)
-                self.terminal.terminate()
-            raise CommandTimedOut(f"command exceeded its {timeout:.1f}-second timeout")
+                raise CommandTimedOut(f"command exceeded its {timeout:.1f}-second timeout")
+            self._lose_executing_session()
+            raise OutcomeUnknown(
+                "The command timed out and shell recovery could not be verified; "
+                "the outcome is unknown."
+            )
         except BaseException:
             if self.state.state is SessionState.EXECUTING:
                 self.state.transition(
@@ -208,6 +270,9 @@ class StatefulSshSession:
         timeout: float,
         *,
         allowed_prompt_kinds: frozenset[PromptKind] = frozenset(),
+        sudo_prompt_token: str | None = None,
+        authentication_starting: Callable[[], bool] | None = None,
+        authentication_completed: Callable[[float], None] | None = None,
     ) -> bytes:
         result = self.terminal.wait_for_data(self._cursor, max(0, timeout))
         self._cursor = result.next_cursor
@@ -218,7 +283,16 @@ class StatefulSshSession:
         for event in self._detector.feed(text):
             if event.kind not in allowed_prompt_kinds:
                 continue
+            if (
+                event.kind is PromptKind.SUDO_PASSWORD
+                and sudo_prompt_token is not None
+                and sudo_prompt_token not in event.prompt
+            ):
+                continue
+            if authentication_starting is not None and not authentication_starting():
+                continue
             self.state.begin_authentication()
+            authentication_started = time.monotonic()
             newline = b"\r" if self.terminal.backend_name == "winpty" else b"\r\n"
             sink = SecretInputSink(self.terminal.write, newline=newline)
             try:
@@ -231,12 +305,42 @@ class StatefulSshSession:
                 self.state.transition(SessionState.FAILED)
                 raise
             self.state.finish_authentication()
+            if authentication_completed is not None:
+                authentication_completed(time.monotonic() - authentication_started)
         return data
 
-    def _drain(self, seconds: float) -> None:
-        deadline = time.monotonic() + seconds
+    def _initialize_shell(
+        self,
+        *,
+        timeout: float,
+        failure_check: Callable[[], None] | None = None,
+    ) -> None:
+        token = new_token()
+        parser = CommandFrameParser(
+            token,
+            max_output_bytes=4_096,
+            shell_nonce=self._shell_nonce,
+        )
+        self._write_command(shell_bootstrap_wrapper(self._shell_nonce, token))
+        deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            self._read_and_handle_prompts(deadline - time.monotonic())
+            if failure_check is not None:
+                failure_check()
+            data = self._read_and_handle_prompts(min(0.25, deadline - time.monotonic()))
+            if data:
+                try:
+                    result = parser.feed(data)
+                except FrameProtocolError as error:
+                    raise SessionError("the Bash bootstrap frame was invalid") from error
+                if result is not None:
+                    if not self.terminal.running:
+                        raise SessionLost("OpenSSH exited during Bash bootstrap")
+                    if result.exit_code != 0:
+                        raise SessionError("the Bash bootstrap command failed")
+                    return
+            if not self.terminal.running:
+                raise SessionLost("OpenSSH exited during Bash bootstrap")
+        raise SessionError("timed out while verifying control of the original Bash shell")
 
     def _activate_command(self, token: str) -> None:
         with self._active_lock:
@@ -273,25 +377,55 @@ class StatefulSshSession:
                 self._active_token = None
 
     def _send_interrupt(self, token: str) -> None:
-        self.terminal.write(REMOTE_VINTR_BYTE)
-        time.sleep(0.2)
-        self.terminal.write(interrupt_recovery_wrapper(token).encode("utf-8"))
+        try:
+            self.terminal.write(REMOTE_VINTR_BYTE)
+            time.sleep(0.2)
+            self.terminal.write(
+                interrupt_recovery_wrapper(token, shell_nonce=self._shell_nonce).encode("utf-8")
+            )
+        except Exception as error:
+            self._lose_executing_session()
+            raise OutcomeUnknown(
+                "The connection failed while interrupting a delivered command; "
+                "the command outcome is unknown."
+            ) from error
 
     def _wait_for_recovery(
         self,
         parser: CommandFrameParser,
         *,
         timeout: float,
-        allowed_prompt_kinds: frozenset[PromptKind],
     ) -> bool:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             data = self._read_and_handle_prompts(
                 min(0.25, deadline - time.monotonic()),
-                allowed_prompt_kinds=allowed_prompt_kinds,
             )
             if data and parser.feed(data) is not None:
                 return True
             if not self.terminal.running:
                 return False
         return False
+
+    def _single_authentication_gate(self) -> Callable[[], bool]:
+        authentication_started = False
+        repeated_prompt_interrupted = False
+
+        def permit() -> bool:
+            nonlocal authentication_started, repeated_prompt_interrupted
+            if not authentication_started:
+                authentication_started = True
+                return True
+            if not repeated_prompt_interrupted:
+                self.terminal.write(REMOTE_VINTR_BYTE)
+                repeated_prompt_interrupted = True
+            return False
+
+        return permit
+
+    def _lose_executing_session(self) -> None:
+        if self.state.state is SessionState.EXECUTING:
+            self.state.transition(SessionState.LOST)
+        with suppress(Exception):
+            if self.terminal.running:
+                self.terminal.terminate()

@@ -6,8 +6,8 @@ Doctor after installation and before adding a production profile.
 ## Published release
 
 Once version 0.1 is published, it is distributed as a Python 3.12 wheel and started checkout-free
-through `uvx`. Use one exact version for the installer and MCP process. The current development
-package `0.0.0.dev1` is not yet that release.
+through `uvx`. Use one exact version for the installer and MCP process. The current source is the
+untagged `0.1.0` candidate and must still use the local-wheel flow below until publication.
 
 ```powershell
 $Version = "0.1.0"

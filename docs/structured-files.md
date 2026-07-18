@@ -69,8 +69,10 @@ from a local Linux filesystem. Rename and creation cannot promise cross-filesyst
 Abrupt SSH or machine loss can leave a same-directory `.serverops.*` temporary file.
 
 If the connection ends after mutation but before the result frame, the response is
-`file_outcome_unknown`. The operation is not retried automatically. A caller must reconnect and
-inspect the remote hash or path state.
+`file_outcome_unknown`. The operation is not retried automatically. Inspect the remote hash or
+path through a new session or independent SSH connection before deciding what to do next.
+`rediscover` only finds an existing broker-owned worker; it does not repair the lost SSH
+connection or resolve the mutation outcome.
 
 The remote host needs Bash plus common Linux commands including `realpath`, `base64`, `stat`,
 `sha256sum`, `find`, `grep`, `od`, `sed`, `head`, `wc`, `mktemp`, `mv`, `chmod` and `chgrp`.
@@ -81,5 +83,5 @@ Doctor reports the exact missing utilities before structured file work begins.
 Unit tests cover input limits, path/value encoding, response framing, UTF-8 and binary handling,
 patch conflicts, capability flags and ownership guards. Optional local disposable-container and
 Windows product smokes cover write/read/patch/search, symlink escape, foreign ownership, a 64 KiB
-transfer, persistent shell state, raw terminal and reconnect without retry. Public CI runs the
-unit contract but does not provision that real SSH environment.
+transfer, persistent shell state, raw terminal and session rediscovery without retry. Public CI
+runs the unit contract but does not provision that real SSH environment.

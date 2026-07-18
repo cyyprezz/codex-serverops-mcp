@@ -34,3 +34,14 @@ exit code, raw terminal cursors and reconnect without retry.
 
 The package now has a useful core surface but remains `0.0.0.dev1`. Setup, structured files,
 elevation, installer and the complete eight-tool `0.1.0` contract remain later milestones.
+
+## Current-product amendment
+
+The historical four-tool milestone above has since grown into the complete eight-tool development
+surface while remaining `0.0.0.dev1`. The public action formerly described here as an MCP
+reconnect is now named `rediscover`. It only returns the existing broker-owned worker and never
+repairs a lost SSH connection, creates a replacement session or retries a command.
+
+The command-completion boundary has also been hardened beyond observing an end frame: the worker
+requires the strict result/cwd/health sequence, control of the original Bash shell and terminal
+liveness. Loss before that verification remains `outcome_unknown`.

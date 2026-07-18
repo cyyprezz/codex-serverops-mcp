@@ -10,6 +10,11 @@ Schema version 1 supports direct OpenSSH targets and existing OpenSSH aliases. C
 is parsed fail-closed: unknown fields, unsupported schema versions, mixed connection modes and
 invalid value combinations are rejected.
 
+The local profile key is included verbatim in setup audit events. Use a short operational label,
+not a hostname, IP address, account name or secret. Custom `environment` text remains valid in the
+profile and UI, but the audit records only the standard categories `unspecified`, `test`,
+`development`, `staging`, `production`, or the redacted fallback `custom`.
+
 ## Direct target
 
 ```toml

@@ -23,7 +23,73 @@ REQUIRED_MANUAL_CHECKS = {
     "public_key_install_and_fresh_login",
     "mcp_restart_and_session_rediscovery",
     "interrupt_disconnect_and_no_retry",
+    "spoofed_remote_prompt_rejected",
+    "shell_state_corruption_detected",
+    "failed_key_transition_reports_remote_key_state",
+    "profile_mutations_audited",
 }
+REQUIRED_EVIDENCE_ENVIRONMENT = {
+    "windows_version",
+    "python_version",
+    "uv_version",
+    "windows_openssh_version",
+    "ubuntu_version",
+    "remote_openssh_version",
+    "sudo_version",
+    "bash_version",
+}
+REQUIRED_EXTERNAL_SCENARIOS = {
+    "direct_connection",
+    "ssh_alias",
+    "password_login",
+    "existing_key",
+    "passphrase_protected_key",
+    "new_ed25519_key",
+    "public_key_install",
+    "fresh_new_key_login",
+    "host_key_confirmation",
+    "auth_cancel",
+    "auth_timeout",
+    "persistent_cwd",
+    "persistent_virtual_environment",
+    "persistent_shell_variables",
+    "completed_command_exit_code",
+    "large_output_truncation",
+    "raw_terminal_start",
+    "raw_terminal_read",
+    "raw_terminal_write",
+    "ctrl_c",
+    "timeout_recovery",
+    "ssh_disconnect",
+    "outcome_unknown",
+    "no_automatic_retry",
+    "mcp_restart",
+    "broker_session_rediscovery",
+    "structured_file_list",
+    "structured_text_read",
+    "structured_search",
+    "structured_hash",
+    "structured_write_text",
+    "structured_apply_patch",
+    "structured_hash_conflict",
+    "structured_symlink_escape",
+    "structured_outside_allowed_roots",
+    "sudo_status",
+    "sudo_acquire",
+    "sudo_server_cache",
+    "sudo_exec",
+    "sudo_release",
+    "root_session",
+    "separate_normal_root_sessions",
+    "doctor_real_profile",
+}
+EVIDENCE_SCENARIO_STATUSES = {
+    "automated",
+    "manually_verified",
+    "not_tested",
+    "not_applicable",
+}
+VERIFIED_SCENARIO_STATUSES = {"automated", "manually_verified"}
 
 
 class ReleaseContractError(RuntimeError):
@@ -121,13 +187,33 @@ def _verify_evidence(repo_root: Path, path: Path, version: str) -> None:
     if not path.is_file():
         raise ReleaseContractError("Stable release requires committed manual release evidence")
     evidence = json.loads(path.read_text(encoding="utf-8"))
-    if evidence.get("schema_version") != 1 or evidence.get("package_version") != version:
+    if evidence.get("schema_version") != 2 or evidence.get("package_version") != version:
         raise ReleaseContractError("Release evidence schema/version is invalid")
     checks = evidence.get("checks")
     if not isinstance(checks, dict) or set(checks) != REQUIRED_MANUAL_CHECKS:
         raise ReleaseContractError("Release evidence check set is incomplete")
     if any(value is not True for value in checks.values()):
         raise ReleaseContractError("Every manual release gate must be explicitly passed")
+    environment = evidence.get("environment")
+    if not isinstance(environment, dict) or set(environment) != REQUIRED_EVIDENCE_ENVIRONMENT:
+        raise ReleaseContractError("Release evidence environment metadata is incomplete")
+    if any(
+        not isinstance(value, str) or not value.strip() or len(value) > 512
+        for value in environment.values()
+    ):
+        raise ReleaseContractError("Release evidence environment metadata is invalid")
+    scenarios = evidence.get("external_scenarios")
+    if not isinstance(scenarios, dict) or set(scenarios) != REQUIRED_EXTERNAL_SCENARIOS:
+        raise ReleaseContractError("External Ubuntu scenario evidence is incomplete")
+    if any(status not in EVIDENCE_SCENARIO_STATUSES for status in scenarios.values()):
+        raise ReleaseContractError("External Ubuntu scenario evidence has an invalid status")
+    unverified = sorted(
+        name for name, status in scenarios.items() if status not in VERIFIED_SCENARIO_STATUSES
+    )
+    if unverified:
+        raise ReleaseContractError(
+            f"Stable release has unverified external Ubuntu scenarios: {unverified}"
+        )
     revision = evidence.get("source_revision")
     if not isinstance(revision, str) or not re.fullmatch(r"[0-9a-f]{7,40}", revision):
         raise ReleaseContractError("Release evidence has no valid source revision")

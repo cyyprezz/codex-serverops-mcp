@@ -6,8 +6,10 @@ import pywintypes
 import win32api
 import win32com.client
 import win32con
+import win32security
 
 from codex_serverops_mcp.errors import ServerOpsError
+from codex_serverops_mcp.ipc.security import current_user_sid_string
 
 from .task_model import (
     BrokerTaskSpec,
@@ -26,12 +28,25 @@ TASK_TRIGGER_LOGON = 9
 ERROR_FILE_NOT_FOUND_HRESULT = 0x80070002
 
 
+def _account_matches(actual: str, expected_name: str, expected_sid: str | None) -> bool:
+    if actual.casefold() == expected_name.casefold():
+        return True
+    if expected_sid is None:
+        return False
+    try:
+        sid, _domain, _account_type = win32security.LookupAccountName(None, actual)
+        return win32security.ConvertSidToStringSid(sid) == expected_sid
+    except pywintypes.error:
+        return False
+
+
 def _managed_definition(
     definition: Any,
     description: str,
     action: Any | None,
     trigger: Any | None,
     account_name: str,
+    account_sid: str | None,
 ) -> bool:
     if action is None or trigger is None:
         return False
@@ -48,12 +63,16 @@ def _managed_definition(
                 arguments,
                 working_directory,
             )
-            and str(definition.Principal.UserId) == account_name
+            and _account_matches(
+                str(definition.Principal.UserId),
+                account_name,
+                account_sid,
+            )
             and int(definition.Principal.LogonType) == TASK_LOGON_INTERACTIVE_TOKEN
             and int(definition.Principal.RunLevel) == TASK_RUNLEVEL_LUA
             and int(trigger.Type) == TASK_TRIGGER_LOGON
             and bool(trigger.Enabled)
-            and str(trigger.UserId) == account_name
+            and _account_matches(str(trigger.UserId), account_name, account_sid)
             and bool(settings.Enabled)
             and bool(settings.AllowDemandStart)
             and bool(settings.StartWhenAvailable)
@@ -76,9 +95,17 @@ class BrokerTaskUnavailable(BrokerTaskError):
 
 
 class BrokerTaskController:
-    def __init__(self, service: Any, *, account_name: str, task_name: str) -> None:
+    def __init__(
+        self,
+        service: Any,
+        *,
+        account_name: str,
+        task_name: str,
+        account_sid: str | None = None,
+    ) -> None:
         self.service = service
         self.account_name = account_name
+        self.account_sid = account_sid
         self.task_name = task_name
         self.root = service.GetFolder("\\")
 
@@ -88,7 +115,13 @@ class BrokerTaskController:
             service = win32com.client.Dispatch("Schedule.Service")
             service.Connect()
             account = win32api.GetUserNameEx(win32con.NameSamCompatible)
-            return cls(service, account_name=account, task_name=broker_task_name())
+            account_sid = current_user_sid_string()
+            return cls(
+                service,
+                account_name=account,
+                account_sid=account_sid,
+                task_name=broker_task_name(account_sid),
+            )
         except pywintypes.com_error as error:
             raise BrokerTaskUnavailable("Windows Task Scheduler is unavailable") from error
 
@@ -111,6 +144,7 @@ class BrokerTaskController:
                 action,
                 trigger,
                 self.account_name,
+                self.account_sid,
             )
             running = int(task.State) == TASK_STATE_RUNNING
         except (AttributeError, TypeError, ValueError, pywintypes.com_error):

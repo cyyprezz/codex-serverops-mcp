@@ -15,7 +15,8 @@ The assistant supports:
 - generating a new Ed25519 key below `%USERPROFILE%\.ssh\serverops` by default;
 - optional local key passphrases through a directly owned `ssh-keygen` ConPTY;
 - installing only the selected public key through an interactive password session;
-- checking for the exact public key before appending to `authorized_keys`;
+- comparing the public-key algorithm and blob before appending, so a different comment does not
+  duplicate the same key;
 - testing a fresh key login before retaining the key-based local profile;
 - configuring terminal/file permissions, allowed roots, elevation guidance, root-session
   guidance, environment label and output limits.
@@ -42,16 +43,40 @@ the SSH user's actual rights and that local roots or elevation settings are not 
 
 For a direct target, automatic installation temporarily stores the confirmed password profile,
 opens an ordinary broker-owned session, creates `~/.ssh` with mode 700 and
-`authorized_keys` with mode 600, and appends only when `grep -qxF` does not find the exact key.
-The public line is base64-encoded only for safe shell transport; base64 is not treated as
-confidentiality.
+`authorized_keys` with mode 600, and compares the key algorithm and Base64 blob while ignoring an
+optional comment. A correlated remote result reports exactly one of `key_already_present` or
+`key_added`. The successful setup result therefore contains
+`public_key_installed = true` and `public_key_was_new = false` or `true`, respectively. The public
+line is Base64-encoded only for safe shell transport; Base64 is not treated as confidentiality.
 
 After the command succeeds, the local profile switches to the private-key path and a completely
-new SSH session tests key login. A failed installation or key-login test restores the previous
-local configuration only if its content hash still matches the setup transaction. It does not
-silently overwrite a concurrent profile change. An already appended remote public key is not
-removed automatically after a later test failure because doing so could remove a key another
-administrator began using.
+new SSH session tests key login. A later failure restores the previous local configuration only if
+its content hash still matches the setup transaction. The returned rollback status is
+`rolled_back`, `skipped_concurrent_change` or `failed`; a concurrent local edit is never silently
+overwritten.
+
+The remote key is never removed automatically. A disconnect after the remote write but before its
+result marker is `outcome_unknown`, so `public_key_installed` and `public_key_was_new` are both
+unknown. A later local-switch or login-test failure may know whether the key was newly added, but
+still does not prove that automatic removal is safe. The visible error states:
+
+```text
+The local profile switch was rolled back.
+
+The public key may already be present in the remote authorized_keys file.
+Review the remote account before retrying or removing the key.
+```
+
+When a concurrent local edit prevents rollback, or rollback itself fails, the first sentence is
+replaced by the corresponding truthful rollback status; the remote-key warning remains.
+
+## Profile and setup audit
+
+Profile creation, update, removal and testing, key generation, and public-key installation emit
+local redacted audit events. They contain the profile name and a narrow capability summary, never
+the host/IP, full key path, public-key line, configuration content or any secret. Audit failure does
+not turn a successful local mutation into a failure; the setup result reports
+`audit.logged = false` instead.
 
 ## Secret handling
 
@@ -66,8 +91,9 @@ one-use `serverops-auth` path directly to the session worker.
 ## Verification boundary
 
 Automated tests cover request expiry, bounded waits, forbidden secret result fields, command-line
-isolation, profile validation, no-overwrite key generation, exact public-key installation,
-fresh-login testing, conflict-aware rollback and the current eight-tool surface. The real Windows
+isolation, profile validation, no-overwrite key generation, comment-insensitive public-key
+identity, added/already-present results, unknown outcomes, fresh-login testing, conflict-aware
+rollback, redacted profile audit and the current eight-tool surface. The real Windows
 ConPTY smoke generates and removes an Ed25519 pair and confirms that no passphrase argument is used.
 
 The actual setup window layout at supported display scales, focus, file picker, local

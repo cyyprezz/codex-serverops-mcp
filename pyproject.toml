@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "codex-serverops-mcp"
-version = "0.0.0.dev1"
+version = "0.1.0"
 description = "Windows-first local MCP transport for stateful SSH server operations"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -60,6 +60,7 @@ include = [
   "/LICENSE",
   "/README.md",
   "/SECURITY.md",
+  "/server.json",
   "/pyproject.toml",
   "/uv.lock",
 ]

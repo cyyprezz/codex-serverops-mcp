@@ -5,7 +5,8 @@ from collections.abc import Mapping
 DEFAULT_BROKER_RESPONSE_TIMEOUT_SECONDS = 15.0
 SESSION_START_RESPONSE_TIMEOUT_SECONDS = 210.0
 TERMINAL_RESPONSE_TIMEOUT_SECONDS = 80.0
-LONG_OPERATION_RESPONSE_TIMEOUT_SECONDS = 3_660.0
+WORKER_LONG_OPERATION_TIMEOUT_SECONDS = 3_726.0
+LONG_OPERATION_RESPONSE_TIMEOUT_SECONDS = 3_728.0
 
 
 def broker_response_timeout(
@@ -23,6 +24,8 @@ def broker_response_timeout(
         action = body.get("action")
         if action == "exec":
             return LONG_OPERATION_RESPONSE_TIMEOUT_SECONDS
-        if action in {"acquire", "open_root_session"}:
+        if action == "acquire":
+            return LONG_OPERATION_RESPONSE_TIMEOUT_SECONDS
+        if action == "open_root_session":
             return SESSION_START_RESPONSE_TIMEOUT_SECONDS
     return DEFAULT_BROKER_RESPONSE_TIMEOUT_SECONDS
