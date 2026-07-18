@@ -1,7 +1,7 @@
 # MCP tool reference
 
-The current development package exposes exactly eight tools. This is the intended public tool
-shape, but the package remains `0.0.0.dev1` until the stable release gates are complete.
+The untagged `0.1.0` candidate exposes exactly eight tools. This is the intended public tool
+shape, but it is not a published release until the stable evidence, merge and tag gates complete.
 
 ## `server_profiles`
 

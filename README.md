@@ -1,5 +1,7 @@
 # Codex ServerOps MCP
 
+<!-- mcp-name: io.github.cyyprezz/codex-serverops-mcp -->
+
 Windows-first local MCP server for operating explicitly configured Linux servers from Codex
 through the Windows OpenSSH client. It keeps stateful Bash sessions alive, exposes structured
 file operations and supports guided sudo without sending passwords or key passphrases through
@@ -48,10 +50,10 @@ In practice, this enables workflows such as:
 - rediscovering broker-owned sessions after the disposable MCP process restarts, without
   rebuilding SSH or retrying a command.
 
-> **Development status:** the current package is `0.0.0.dev1`, not the stable `0.1.0` release.
-> Historical external-server evidence exists, but the final candidate gates are not complete and
-> the public CI does not reproduce a real SSH/sudo server. Use only disposable or non-production
-> accounts while release hardening is in progress.
+> **Release candidate status:** the source package is the untagged `0.1.0` candidate, not a
+> published release. Historical external-server evidence exists, but the final candidate gates
+> are not complete and public CI does not reproduce a real SSH/sudo server. Use only disposable
+> or non-production accounts until the release evidence, merge and tag are complete.
 
 ## What it provides
 

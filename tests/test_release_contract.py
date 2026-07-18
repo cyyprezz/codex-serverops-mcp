@@ -31,11 +31,11 @@ def _evidence_document() -> dict[str, object]:
 
 
 class ReleaseContractTests(unittest.TestCase):
-    def test_development_tree_satisfies_pre_release_contract(self) -> None:
-        self.assertEqual(verify_release(), "0.0.0.dev1")
+    def test_untagged_candidate_satisfies_pre_release_contract(self) -> None:
+        self.assertEqual(verify_release(), "0.1.0")
 
-    def test_stable_tag_cannot_be_claimed_from_development_version(self) -> None:
-        with self.assertRaisesRegex(ReleaseContractError, "stable package version"):
+    def test_stable_tag_cannot_be_claimed_without_committed_evidence(self) -> None:
+        with self.assertRaisesRegex(ReleaseContractError, "committed manual release evidence"):
             verify_release(tag="v0.1.0")
 
     def test_distribution_exposes_only_six_product_commands(self) -> None:

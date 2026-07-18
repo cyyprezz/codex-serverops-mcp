@@ -79,7 +79,7 @@ wheels = [
 
 [[package]]
 name = "codex-serverops-mcp"
-version = "0.0.0.dev1"
+version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "mcp" },
