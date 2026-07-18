@@ -6,6 +6,7 @@ from tkinter import messagebox, ttk
 
 from codex_serverops_mcp.config import ServerProfile
 from codex_serverops_mcp.errors import ServerOpsError
+from codex_serverops_mcp.security import SetupAuditStatus
 
 from .draft import CredentialMode, ProfileDraft
 from .form import ProfileForm
@@ -216,9 +217,11 @@ class SetupWindow:
         draft: ProfileDraft,
     ) -> dict[str, object]:
         public_key: str | None = None
+        key_audit: SetupAuditStatus | None = None
         if draft.credential_mode is CredentialMode.NEW_KEY:
             secret_source = self.form.take_key_secret()
-            generated = self.key_generator.generate(
+            generated, key_audit = self.operations.generate_key(
+                self.key_generator,
                 draft.profile_name,
                 secret_source,
                 destination=draft.private_key_path,
@@ -234,16 +237,18 @@ class SetupWindow:
             if draft.password_profile is None:
                 raise RuntimeError("password staging profile is unavailable")
             public_key = public_key or read_public_key(self._required_public_path(draft))
-            return self.operations.install_public_key_and_switch(
+            result = self.operations.install_public_key_and_switch(
                 draft.profile_name,
                 draft.password_profile,
                 draft.profile,
                 public_key,
                 replace_existing=action is SetupAction.EDIT,
             )
-        if action is SetupAction.ADD:
-            return self.operations.add(draft.profile_name, draft.profile)
-        return self.operations.edit(draft.profile_name, draft.profile)
+        elif action is SetupAction.ADD:
+            result = self.operations.add(draft.profile_name, draft.profile)
+        else:
+            result = self.operations.edit(draft.profile_name, draft.profile)
+        return key_audit.attach(result) if key_audit is not None else result
 
     def _remove(self) -> None:
         profile_name = self.record.request.profile_name or ""

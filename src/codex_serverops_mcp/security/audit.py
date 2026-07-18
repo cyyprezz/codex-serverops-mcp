@@ -77,6 +77,7 @@ class AuditLogger:
             "command_redacted": False if preview is None else preview.redacted,
             "command_preview_truncated": False if preview is None else preview.truncated,
         }
+        event.update(_profile_event_fields(response))
         self._append(timestamp.date().isoformat(), event)
         return AuditWriteResult(
             logged=True,
@@ -111,3 +112,26 @@ def _text(value: object) -> str | None:
 
 def _integer(value: object) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _profile_event_fields(response: Mapping[str, object]) -> dict[str, object]:
+    text_fields = ("connection_type", "authentication", "environment", "elevation_mode")
+    bool_fields = (
+        "terminal_enabled",
+        "file_read_enabled",
+        "file_write_enabled",
+        "root_session_enabled",
+    )
+    if "profile_name" not in response and not any(
+        name in response for name in (*text_fields, *bool_fields)
+    ):
+        return {}
+    fields: dict[str, object] = {"profile_name": _text(response.get("profile_name"))}
+    fields.update({name: _text(response.get(name)) for name in text_fields})
+    fields.update(
+        {
+            name: value if isinstance(value := response.get(name), bool) else None
+            for name in bool_fields
+        }
+    )
+    return fields
