@@ -162,11 +162,17 @@ class StatefulSshSession:
                 else frozenset()
             )
             deadline = started + timeout
+
+            def preserve_remote_timeout(authentication_seconds: float) -> None:
+                nonlocal deadline
+                deadline += authentication_seconds
+
             while time.monotonic() < deadline:
                 data = self._read_and_handle_prompts(
                     min(0.25, deadline - time.monotonic()),
                     allowed_prompt_kinds=allowed_prompts,
                     sudo_prompt_token=sudo_prompt_token,
+                    authentication_completed=preserve_remote_timeout,
                 )
                 if data:
                     try:
@@ -258,6 +264,7 @@ class StatefulSshSession:
         *,
         allowed_prompt_kinds: frozenset[PromptKind] = frozenset(),
         sudo_prompt_token: str | None = None,
+        authentication_completed: Callable[[float], None] | None = None,
     ) -> bytes:
         result = self.terminal.wait_for_data(self._cursor, max(0, timeout))
         self._cursor = result.next_cursor
@@ -275,6 +282,7 @@ class StatefulSshSession:
             ):
                 continue
             self.state.begin_authentication()
+            authentication_started = time.monotonic()
             newline = b"\r" if self.terminal.backend_name == "winpty" else b"\r\n"
             sink = SecretInputSink(self.terminal.write, newline=newline)
             try:
@@ -287,6 +295,8 @@ class StatefulSshSession:
                 self.state.transition(SessionState.FAILED)
                 raise
             self.state.finish_authentication()
+            if authentication_completed is not None:
+                authentication_completed(time.monotonic() - authentication_started)
         return data
 
     def _initialize_shell(

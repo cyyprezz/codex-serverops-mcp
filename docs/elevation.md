@@ -23,6 +23,9 @@ A password is entered only in the separate visible local authentication process 
 a one-use current-user DirectAuth pipe directly to the worker that owns OpenSSH. It is absent from
 the MCP schema, broker protocol, profile config, environment, process arguments, normal results
 and logs. Matching output during `server_exec` or raw-terminal use does not authorize the window.
+Time spent in that bounded local authentication window does not consume the remote command
+timeout. After a successful response, the remote sudo command still receives its configured
+timeout while the combined broker and Codex deadlines remain bounded.
 
 Non-interactive mode always passes `sudo -n`. It does not silently fall back to an interactive
 prompt. `status` also uses a non-prompting validation. `release` calls `sudo -k` to invalidate the

@@ -32,6 +32,7 @@ from codex_serverops_mcp.runtime import RuntimeDirectory
 from .errors import BrokerAlreadyRunning, BrokerRequestError
 from .model import SessionRecord
 from .supervisor import WorkerSupervisor
+from .timeouts import WORKER_LONG_OPERATION_TIMEOUT_SECONDS
 
 
 def _process_is_alive(pid: int) -> bool:
@@ -209,7 +210,7 @@ class BrokerServer:
                 session_id,
                 "worker.exec",
                 worker_payload,
-                timeout=3_730,
+                timeout=WORKER_LONG_OPERATION_TIMEOUT_SECONDS,
             )
         if message_type == "session.terminal":
             if "session_id" not in payload:
@@ -236,7 +237,7 @@ class BrokerServer:
                 session_id,
                 worker_type,
                 worker_payload,
-                timeout=3_730,
+                timeout=WORKER_LONG_OPERATION_TIMEOUT_SECONDS,
             )
         if message_type == "session.elevation":
             return self._handle_elevation(payload)
@@ -286,7 +287,7 @@ class BrokerServer:
             session_id,
             "worker.elevation",
             worker_payload,
-            timeout=3_730,
+            timeout=WORKER_LONG_OPERATION_TIMEOUT_SECONDS,
         )
 
     def _request_session(

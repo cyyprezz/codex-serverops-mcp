@@ -20,6 +20,8 @@ from codex_serverops_mcp.broker.supervisor import WorkerHandle, WorkerSupervisor
 from codex_serverops_mcp.broker.timeouts import (
     DEFAULT_BROKER_RESPONSE_TIMEOUT_SECONDS,
     LONG_OPERATION_RESPONSE_TIMEOUT_SECONDS,
+    WORKER_LONG_OPERATION_TIMEOUT_SECONDS,
+    broker_response_timeout,
 )
 from codex_serverops_mcp.ipc.errors import IpcClosed
 from codex_serverops_mcp.runtime import RuntimeDirectory
@@ -144,6 +146,17 @@ class BrokerOutcomeTests(unittest.TestCase):
             connection.receive_timeout,
             DEFAULT_BROKER_RESPONSE_TIMEOUT_SECONDS,
         )
+
+    def test_sudo_acquire_allows_local_auth_without_shortening_remote_timeout(self) -> None:
+        self.assertEqual(
+            broker_response_timeout("session.elevation", {"action": "acquire"}),
+            LONG_OPERATION_RESPONSE_TIMEOUT_SECONDS,
+        )
+        self.assertLess(
+            WORKER_LONG_OPERATION_TIMEOUT_SECONDS,
+            LONG_OPERATION_RESPONSE_TIMEOUT_SECONDS,
+        )
+        self.assertLess(LONG_OPERATION_RESPONSE_TIMEOUT_SECONDS, 3_730)
 
     def test_worker_disconnect_invalidates_session_and_preserves_unknown_code(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
