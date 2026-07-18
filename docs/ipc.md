@@ -37,6 +37,12 @@ protocol mismatches fail closed. A receive timeout, partial frame, invalid frame
 failure permanently closes that connection; a later request never reuses an ambiguous stream.
 Unknown message types produce a correlated controlled error.
 
+Product handshakes have a five-second deadline. Broker responses use bounded, operation-specific
+deadlines that cover the documented maximum command duration without allowing an absent peer to
+block forever. Server request loops may remain idle for a long-lived session, but once the first
+byte of a frame arrives the complete frame must arrive within five seconds or the connection is
+discarded.
+
 ## Handshake
 
 The client first sends a fresh nonce and role without the broker-instance token. The server returns

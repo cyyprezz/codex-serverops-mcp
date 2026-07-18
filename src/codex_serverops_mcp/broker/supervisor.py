@@ -142,7 +142,7 @@ class WorkerSupervisor:
             self._validate_status(status, session_id, profile_name, root_session=root_session)
             pipe = str(status["pipe"])
             connection = connect_named_pipe(pipe, timeout=timeout)
-            client_handshake(connection, token, role="broker")
+            client_handshake(connection, token, role="broker", timeout=timeout)
             now = time.time()
             worker_pid = int(status["pid"])
             record = SessionRecord(
@@ -157,7 +157,7 @@ class WorkerSupervisor:
                 parent_session_id=parent_session_id,
             )
             handle = WorkerHandle(record, process, connection, token, threading.Lock())
-            response = handle.request("worker.ping")
+            response = handle.request("worker.ping", timeout=5)
             if response.payload.get("pid") != worker_pid:
                 raise BrokerRequestError("worker PID verification failed")
             if open_session:
@@ -248,7 +248,7 @@ class WorkerSupervisor:
                 raise SessionNotFound(f"session does not exist: {session_id}") from error
         try:
             if handle.process.poll() is None:
-                handle.request("worker.shutdown")
+                handle.request("worker.shutdown", timeout=5)
         except (BrokerRequestError, IpcError):
             pass
         finally:

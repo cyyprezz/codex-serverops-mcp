@@ -18,6 +18,7 @@ from .errors import (
     BrokerUnavailable,
 )
 from .outcomes import uncertain_outcome_code
+from .timeouts import broker_response_timeout
 
 
 class BrokerClient:
@@ -31,7 +32,11 @@ class BrokerClient:
         connection: PipeConnection | None = None
         try:
             connection = connect_named_pipe(str(status["pipe"]), timeout=timeout)
-            client_handshake(connection, str(status["instance_token"]))
+            client_handshake(
+                connection,
+                str(status["instance_token"]),
+                timeout=timeout,
+            )
         except IpcError as error:
             if connection is not None:
                 connection.close()
@@ -51,7 +56,9 @@ class BrokerClient:
                 if connection is None:
                     raise BrokerUnavailable("broker client is closed")
                 connection.send(request)
-                response = connection.receive()
+                response = connection.receive(
+                    timeout=broker_response_timeout(message_type, payload)
+                )
         except IpcError as error:
             self.close()
             self._raise_transport_failure(message_type, payload, error)

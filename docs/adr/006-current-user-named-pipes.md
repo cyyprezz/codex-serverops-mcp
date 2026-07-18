@@ -19,6 +19,10 @@ to a random per-broker instance token without transmitting that token. Any timeo
 or invalid correlation closes the stream. Do not reuse `multiprocessing.connection` in product
 IPC.
 
+Every product handshake has a fixed deadline. Client requests use operation-specific response
+deadlines. An authenticated server connection can wait indefinitely for the first byte so an idle
+stateful session remains valid, but a started frame must complete within a fixed frame deadline.
+
 ## Consequences
 
 Product IPC is Windows-specific by design and pywin32 is a Windows-only pinned dependency.

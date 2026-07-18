@@ -130,6 +130,52 @@ class NamedPipeTests(unittest.TestCase):
         self.assertFalse(thread.is_alive())
         self.assertEqual(errors, [])
 
+    def test_frame_deadline_allows_idle_but_rejects_a_partial_frame(self) -> None:
+        import win32file
+
+        from codex_serverops_mcp.ipc.errors import IpcTimeout
+        from codex_serverops_mcp.ipc.messages import Envelope
+        from codex_serverops_mcp.ipc.named_pipe import NamedPipeListener, connect_named_pipe
+
+        listener = NamedPipeListener(self._pipe_path())
+        received: list[Envelope] = []
+        errors: list[BaseException] = []
+
+        def serve_complete() -> None:
+            try:
+                with listener.accept() as connection:
+                    received.append(connection.receive(frame_timeout=0.1))
+            except BaseException as error:
+                errors.append(error)
+
+        complete_thread = threading.Thread(target=serve_complete)
+        complete_thread.start()
+        with connect_named_pipe(listener.path) as client:
+            time.sleep(0.15)
+            client.send(Envelope.create("idle.complete", {}))
+        complete_thread.join(timeout=3)
+
+        def serve_partial() -> None:
+            try:
+                with listener.accept() as connection:
+                    connection.receive(frame_timeout=0.1)
+            except BaseException as error:
+                errors.append(error)
+
+        partial_thread = threading.Thread(target=serve_partial)
+        partial_thread.start()
+        with connect_named_pipe(listener.path) as client:
+            win32file.WriteFile(client._handle, b"\0")  # noqa: SLF001
+            partial_thread.join(timeout=3)
+        listener.close()
+
+        self.assertFalse(complete_thread.is_alive())
+        self.assertFalse(partial_thread.is_alive())
+        self.assertEqual(len(received), 1)
+        self.assertEqual(received[0].message_type, "idle.complete")
+        self.assertEqual(len(errors), 1)
+        self.assertIsInstance(errors[0], IpcTimeout)
+
     def test_untrusted_server_never_receives_the_instance_token(self) -> None:
         from codex_serverops_mcp import BROKER_PROTOCOL_VERSION
         from codex_serverops_mcp.ipc.errors import IpcAuthenticationError

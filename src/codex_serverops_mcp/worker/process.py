@@ -9,7 +9,11 @@ from codex_serverops_mcp import WORKER_PROTOCOL_VERSION
 from codex_serverops_mcp.config.model import validate_profile_name
 from codex_serverops_mcp.errors import ServerOpsError
 from codex_serverops_mcp.identifiers import validate_session_id
-from codex_serverops_mcp.ipc.errors import IpcAuthenticationError, IpcClosed
+from codex_serverops_mcp.ipc.constants import (
+    IPC_FRAME_TIMEOUT_SECONDS,
+    IPC_HANDSHAKE_TIMEOUT_SECONDS,
+)
+from codex_serverops_mcp.ipc.errors import IpcClosed, IpcError
 from codex_serverops_mcp.ipc.handshake import server_handshake
 from codex_serverops_mcp.ipc.messages import Envelope
 from codex_serverops_mcp.ipc.named_pipe import NamedPipeListener
@@ -67,9 +71,16 @@ def run_worker(
                     break
                 with connection:
                     try:
-                        server_handshake(connection, token, expected_role="broker")
+                        server_handshake(
+                            connection,
+                            token,
+                            expected_role="broker",
+                            timeout=IPC_HANDSHAKE_TIMEOUT_SECONDS,
+                        )
                         while not stop:
-                            request = connection.receive()
+                            request = connection.receive(
+                                frame_timeout=IPC_FRAME_TIMEOUT_SECONDS
+                            )
                             try:
                                 reply = handler.handle(request.message_type, request.payload)
                                 response_type = f"{request.message_type}.result"
@@ -109,7 +120,7 @@ def run_worker(
                                         "root_session": root_session,
                                     },
                                 )
-                    except (IpcAuthenticationError, IpcClosed):
+                    except IpcError:
                         continue
         finally:
             status_path.unlink(missing_ok=True)

@@ -18,7 +18,11 @@ from codex_serverops_mcp.config.model import validate_profile_name
 from codex_serverops_mcp.errors import ServerOpsError
 from codex_serverops_mcp.identifiers import validate_session_id
 from codex_serverops_mcp.ipc.connection import PipeConnection
-from codex_serverops_mcp.ipc.errors import IpcAuthenticationError, IpcClosed, IpcError
+from codex_serverops_mcp.ipc.constants import (
+    IPC_FRAME_TIMEOUT_SECONDS,
+    IPC_HANDSHAKE_TIMEOUT_SECONDS,
+)
+from codex_serverops_mcp.ipc.errors import IpcError
 from codex_serverops_mcp.ipc.handshake import server_handshake
 from codex_serverops_mcp.ipc.messages import Envelope
 from codex_serverops_mcp.ipc.named_pipe import NamedPipeListener, connect_named_pipe
@@ -114,12 +118,18 @@ class BrokerServer:
     def _serve_client(self, connection: PipeConnection) -> None:
         try:
             with connection:
-                server_handshake(connection, self.instance_token)
+                server_handshake(
+                    connection,
+                    self.instance_token,
+                    timeout=IPC_HANDSHAKE_TIMEOUT_SECONDS,
+                )
                 while not self._stop.is_set():
-                    request = connection.receive()
+                    request = connection.receive(
+                        frame_timeout=IPC_FRAME_TIMEOUT_SECONDS
+                    )
                     response = self._dispatch(request)
                     connection.send(response)
-        except (IpcAuthenticationError, IpcClosed):
+        except IpcError:
             pass
         finally:
             with self._thread_lock:
