@@ -149,14 +149,36 @@ def _verify_evidence(repo_root: Path, path: Path, version: str) -> None:
         check=False,
         capture_output=True,
     )
+    if ancestor.returncode != 0:
+        raise ReleaseContractError("Manual release evidence revision is not an ancestor of HEAD")
+    follow_up_count = subprocess.run(
+        ["git", "rev-list", "--count", f"{revision}..HEAD"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    if follow_up_count != "1":
+        raise ReleaseContractError(
+            "Manual release evidence must be HEAD or exactly one evidence-only follow-up commit"
+        )
     changed = subprocess.run(
-        ["git", "diff", "--name-only", "--no-renames", revision, "HEAD", "--"],
+        [
+            "git",
+            "diff-tree",
+            "--no-commit-id",
+            "--name-only",
+            "-r",
+            "--no-renames",
+            "HEAD",
+            "--",
+        ],
         cwd=repo_root,
         check=True,
         capture_output=True,
         text=True,
     ).stdout.splitlines()
-    if ancestor.returncode != 0 or changed != ["docs/release-evidence.json"]:
+    if changed != ["docs/release-evidence.json"]:
         raise ReleaseContractError(
             "Manual release evidence must match the release commit except for its own "
             "evidence-only commit"

@@ -58,6 +58,7 @@ class ReleaseContractTests(unittest.TestCase):
                     side_effect=(
                         SimpleNamespace(stdout="b" * 40),
                         SimpleNamespace(returncode=0),
+                        SimpleNamespace(stdout="1\n"),
                         SimpleNamespace(stdout="README.md\n"),
                     ),
                 ),
@@ -85,8 +86,37 @@ class ReleaseContractTests(unittest.TestCase):
                 side_effect=(
                     SimpleNamespace(stdout="b" * 40),
                     SimpleNamespace(returncode=0),
+                    SimpleNamespace(stdout="1\n"),
                     SimpleNamespace(stdout="docs/release-evidence.json\n"),
                 ),
+            ):
+                _verify_evidence(Path(temporary), evidence, "0.1.0")
+
+    def test_manual_evidence_rejects_multiple_evidence_only_follow_ups(self) -> None:
+        with TemporaryDirectory() as temporary:
+            evidence = Path(temporary) / "release-evidence.json"
+            evidence.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "package_version": "0.1.0",
+                        "source_revision": "a" * 40,
+                        "completed_at": "2026-07-18T12:00:00Z",
+                        "checks": dict.fromkeys(REQUIRED_MANUAL_CHECKS, True),
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with (
+                patch(
+                    "scripts.verify_release.subprocess.run",
+                    side_effect=(
+                        SimpleNamespace(stdout="b" * 40),
+                        SimpleNamespace(returncode=0),
+                        SimpleNamespace(stdout="2\n"),
+                    ),
+                ),
+                self.assertRaisesRegex(ReleaseContractError, "exactly one"),
             ):
                 _verify_evidence(Path(temporary), evidence, "0.1.0")
 
