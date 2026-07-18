@@ -20,6 +20,31 @@ Every auth request has a random request ID, a fresh 256-bit connection key, a 16
 message limit and an exact worker-protocol version. The listener accepts once and then closes.
 Unknown or mismatched responses fail closed. Auth input is never logged.
 
+## Current-product amendment (2026-07-18)
+
+The original one-use worker/UI DirectAuth channel remains the visible-input boundary, but it no
+longer treats connection-looking ConPTY text as proof that OpenSSH requested a credential.
+Connection authentication now uses Windows OpenSSH Askpass as its provenance boundary, as decided
+in [ADR 015](015-windows-openssh-askpass-boundary.md).
+
+OpenSSH invokes the existing `serverops-auth` entry point in helper mode with
+`SSH_ASKPASS_REQUIRE=force`. The helper authenticates to a random current-user-SID-only worker pipe
+with a role-bound nonce/HMAC handshake. The worker applies the selected profile policy and only
+then launches the normal visible DirectAuth UI. The response path is
+`UI -> worker -> short-lived relay buffer -> Askpass stdout -> OpenSSH`; secrets never enter MCP,
+broker, environment values, process arguments or audit.
+
+Direct password permits host key plus account password. Direct OpenSSH permits host key plus key
+passphrase and disables account-password/keyboard-interactive authentication. SSH aliases follow
+OpenSSH configuration but receive at most one credential response. All modes permit at most one
+complete host-key decision, and every connection prompt is rejected after the credential answer.
+Completed-command and raw-terminal output cannot invoke Askpass.
+
+Sudo remains a separate operation-authorized PTY path. Interactive root startup binds its custom
+`sudo -p` text to a fresh worker nonce so a matching-looking banner cannot authorize DirectAuth.
+This decision does not claim protection from a malicious genuine PAM challenge or a fully
+compromised process already running as the same Windows user.
+
 ## Spike automation exception
 
 The repeatable automated Docker run generated disposable credentials inside the ignored
@@ -29,11 +54,12 @@ credential-storage design. The manual mode uses the visible direct pipe.
 
 ## Product evidence
 
-The product auth program now uses the secured native pipe primitive. Automated Windows tests
-cover the effective SID-only DACL, invalid tokens, reuse, expiry, all supported response types,
-UI cancellation, timeout and mutable-buffer clearing. The token is inherited through the auth
-process environment and never appears in its command line. Architecture tests keep the broker
-outside the direct worker/UI boundary.
+The product auth program and Askpass relay use the secured native pipe primitive. Automated
+Windows tests cover the effective SID-only DACL, invalid tokens, HMAC role, reuse, expiry, all
+supported response types, UI cancellation, timeout, real helper entry point, profile mismatch,
+post-credential rejection and mutable-buffer clearing. Capability tokens are inherited through
+the respective child environments and never appear in command lines; credentials are never
+environment values. Architecture tests keep the broker outside the direct worker/UI boundary.
 
 The automated client is intentionally headless. Actual top-level visibility, input masking,
 focus and close behavior remain the documented manual Windows release check and are not claimed

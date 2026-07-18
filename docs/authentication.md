@@ -1,42 +1,73 @@
 # Visible authentication isolation
 
-`serverops-auth` is a separate local Tk window started by the session worker for exactly one
-locally authorized OpenSSH or sudo prompt. It displays the profile, target, user and original
-prompt. Password and passphrase inputs are masked; host keys show the bounded OpenSSH notice,
-including key algorithm and fingerprint, and require an explicit confirm or reject decision.
+ServerOps separates connection authentication from terminal output by using Windows OpenSSH
+Askpass as the provenance boundary. OpenSSH must invoke the configured helper with
+`SSH_ASKPASS_REQUIRE=force`; text that merely appears in the ConPTY stream is never treated as a
+host-key, account-password or key-passphrase request.
 
-Credential prompts are operation-bound. Host-key, SSH-password and key-passphrase prompts are
-accepted only while OpenSSH is establishing a configured connection. A sudo prompt is accepted
-only while an explicit interactive elevation action or root-session opening is executing. Text
-printed by `server_exec` or an interactive remote program can never open an authentication
-window, even when it resembles a password prompt.
+The existing `serverops-auth` entry point has two local roles. In normal mode it is the visible Tk
+window. When OpenSSH starts it with the worker-issued Askpass environment, it is a minimal helper
+that forwards the OpenSSH prompt to the owning worker and writes only the authorized response to
+Askpass stdout. It does not display a second credential UI or carry a secret in its environment or
+command line.
+
+The visible window still uses the worker's DirectAuth coordinator. It displays the profile,
+target, user and original bounded prompt. Password and passphrase inputs are masked. A host-key
+request preserves the complete bounded OpenSSH notice, including key algorithm and SHA-256
+fingerprint, and requires an explicit confirm or reject decision.
 
 ## Direct data path
 
 ```text
-OpenSSH prompt -> session worker -> one-use SID-only pipe -> serverops-auth
-OpenSSH input  <- session worker <- direct response       <- local operator
+OpenSSH -> invokes serverops-auth in Askpass mode
+prompt  -> Askpass helper -> SID-only/HMAC worker relay -> DirectAuth worker coordinator
+                                                       -> visible serverops-auth window
+
+secret  <- Askpass stdout <- short-lived relay buffer <- owning worker <- DirectAuth UI response
 ```
 
-The MCP and broker are not part of this path. Architecture tests prevent the broker from
-importing the auth implementation and prevent the auth program from importing broker or worker
-implementation modules. The worker is the only component that receives the direct response and
-writes it to its owned OpenSSH terminal.
+The MCP and broker are not part of either local channel. A credential follows only
+`UI -> worker -> short-lived relay buffer -> Askpass stdout -> OpenSSH`. It is never an MCP
+parameter, broker message, profile value, environment variable, process argument, normal result,
+exception payload or audit event. Mutable UI, wire, relay and worker buffers are cleared on a
+best-effort basis after use.
 
-For each prompt the worker creates:
+The worker relay uses a random named-pipe path with a current-user-SID-only Windows DACL and a
+fresh random token. The helper and relay perform the role-bound nonce/HMAC handshake before a
+prompt is accepted. The capability token and pipe name are inherited through the child
+environment; they are not credentials. The helper removes its inherited copies immediately, and
+the capability becomes unusable when the relay closes. Invalid handshakes, malformed requests,
+timeouts and ambiguous connection state fail closed.
 
-- a fresh 128-bit request ID,
-- a fresh 256-bit connection token,
-- a random named-pipe path with a current-user-only Windows DACL,
-- a wall-clock expiry shown to the client and an independent monotonic server deadline,
-- an exact worker-protocol version and a 16 KiB transport limit.
+For every visible DirectAuth request the worker separately creates a fresh request ID, token and
+one-use SID-only pipe. The UI receives only the bounded prompt and non-secret target context. Its
+response goes directly to the worker; the broker cannot observe it.
 
-The token is inherited by the auth child through its environment and removed there immediately.
-It is never placed on the process command line. A wrong token is rejected without consuming the
-request; a successfully authenticated request is consumed once. Reuse, unknown response types,
-oversized responses, disconnects and expired requests fail closed.
+## Connection prompt policy
 
-## Outcomes
+The worker classifies and authorizes an Askpass invocation before opening the visible window:
+
+- a direct `interactive_password` profile permits one complete host-key decision and one account
+  password; public-key authentication is disabled in the OpenSSH arguments;
+- a direct `openssh` profile permits one complete host-key decision and one private-key
+  passphrase; account-password and keyboard-interactive authentication are disabled;
+- an SSH-alias profile follows the user's OpenSSH configuration and may request either an account
+  password or a key passphrase, but still receives at most one credential answer;
+- at most one host-key answer and one credential answer are accepted, and after a credential has
+  been answered every later connection prompt is rejected.
+
+Credential prompts are limited to 500 characters. A host-key request is limited to 2048
+characters and is accepted only when the complete notice contains the authenticity statement,
+algorithm, SHA-256 fingerprint and confirmation question. An incomplete confirmation line is not
+enough.
+
+`server_exec` and `server_terminal` output can never invoke Askpass or authorize a connection
+dialog. Sudo is intentionally separate: only an explicit interactive elevation operation may
+authorize a PTY sudo prompt. An interactive root-session startup additionally binds its custom
+`sudo -p` text to a fresh random operation nonce; a matching-looking banner without that nonce is
+ignored. Non-interactive elevation always uses `sudo -n`.
+
+## Outcomes and limits
 
 The worker maps local outcomes to controlled statuses:
 
@@ -47,15 +78,17 @@ authentication_timeout
 authentication_failed
 ```
 
-A host-key confirmation sends only `yes`; rejection does not silently trust the server. A
-credential response is limited to 4096 bytes and cannot contain a line ending. Mutable client,
-wire and worker response buffers are overwritten after use. If auth is cancelled or becomes
-ambiguous, the owning SSH process is terminated instead of leaving a hidden password prompt.
+A host-key confirmation supplies only `yes`; rejection never silently trusts the server. A
+credential response is limited to 4096 bytes and cannot contain a line ending. If connection
+authentication is cancelled, rejected, timed out or becomes ambiguous, the owning SSH process is
+terminated rather than left at a hidden prompt.
 
-Python, Tk and Windows may create internal memory copies that cannot be reliably locked or
-overwritten. The product therefore promises no persistence, logging or routing through MCP and
-broker—not an impossible guarantee that a credential never exists in process memory while it is
-being entered and transmitted.
+Askpass proves that OpenSSH invoked the helper; it does not prove that a genuine server-side PAM
+challenge is benevolent. The strict profile and prompt-count rules reduce that exposure but do
+not replace trusted server configuration. Current-user pipe ACLs and HMAC capabilities also do
+not protect against a fully compromised process already running as the same Windows user. Python,
+Tk and Windows may create internal memory copies that cannot be reliably locked or overwritten,
+so the promise concerns routing, persistence and logging, with best-effort mutable-buffer clearing.
 
 ServerOps uses its own protected `known_hosts` file below the local configuration directory.
 Trusting a displayed fingerprint therefore affects ServerOps connections, not the user's normal
@@ -63,15 +96,15 @@ OpenSSH `known_hosts` file.
 
 ## Verification boundary
 
-Automated Windows tests cover the pipe DACL, correct and incorrect tokens, single use, expiry,
-all four prompt kinds, cancellation, rejection, timeout, response bounds and buffer clearing.
-They use a headless protocol client and do not claim that a real window was visible. Window
-layout, masking, focus, close behavior and taskbar presence remain a private manual release check.
+Automated Windows tests cover the pipe DACL and HMAC role, the real existing `serverops-auth`
+entry point in Askpass mode, full host-key notices, direct-password/direct-key/alias policy,
+prompt-count limits, post-credential rejection, fake terminal banners, cancellation, rejection,
+timeout, response bounds and buffer clearing. The reproducible Windows/OpenSSH spike and product
+decision are recorded in [ADR 015](adr/015-windows-openssh-askpass-boundary.md).
 
-The coordinator implements the `StatefulSshSession` authentication contract and is composed by
-the broker-created product worker. The headless product smoke preloads its disposable fixture
-host key and uses key authentication, so it does not replace the manual visible-window check.
+Protocol automation does not claim that a real window was visible. Window layout, masking, focus,
+close behavior and taskbar presence remain a manual Windows release check.
 
 The optional passphrase entered while creating a new key is a separate setup concern. It stays
-inside `serverops-setup` and its directly owned `ssh-keygen` ConPTY; it is not sent through this
-auth protocol. Later logins with that protected key use the direct auth path described above.
+inside `serverops-setup` and its directly owned `ssh-keygen` ConPTY. Later logins with that
+protected key use the Askpass path described above.

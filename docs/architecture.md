@@ -14,8 +14,10 @@ Codex
               -> one per-user broker process
               -> one session-worker process per SSH session
                   -> Windows OpenSSH in ConPTY
-                  -> one-use direct authentication channel
-                      -> visible local authentication process
+                      -> existing serverops-auth entry point in Askpass mode
+                          -> SID-only/HMAC worker relay
+                              -> one-use DirectAuth channel
+                                  -> visible serverops-auth process
 ```
 
 The MCP process owns no OpenSSH process. The broker owns session metadata but never receives
@@ -36,7 +38,7 @@ config/      Profile model, TOML codec, locking and atomic repository
 broker/      Session registry, worker lifecycle and rediscovery behavior
 worker/      Session state machine and exactly one SSH/terminal owner
 ipc/         Versioned envelopes, size limits and secured Windows pipes
-auth/        One-use auth protocol, launcher and visible local program
+auth/        Askpass helper mode, one-use DirectAuth protocol and visible local program
 setup/       Request store, visible profile UI, key generation and setup operations
 ssh/         OpenSSH arguments, prompt recognition and command framing
 terminal/    ConPTY primitive, reader and bounded absolute-cursor buffer
@@ -69,9 +71,9 @@ they can be tested without starting processes.
 2. State transitions live in `worker/state.py`, not in transport or MCP adapters.
 3. OpenSSH argument construction lives in `ssh/invocation.py`; no shell command string is
    built for local process startup.
-4. Prompt recognition lives in `ssh/prompts.py`, but the worker authorizes prompt kinds from the
-   active local operation. Secret transport belongs only to `auth/` and the owning worker;
-   arbitrary remote output cannot authorize a dialog.
+4. OpenSSH Askpass invocation is the provenance boundary for connection prompts. The worker then
+   applies the selected profile's prompt policy before DirectAuth may open a visible window.
+   ConPTY, completed-command and raw-terminal text cannot authorize a connection dialog.
 5. Command framing lives in `ssh/framing.py`; terminal buffering remains unaware of commands.
 6. IPC envelope validation and size limits are independent from named-pipe lifecycle code.
 7. Public tool handlers perform validation and delegation, not process orchestration.
@@ -106,18 +108,29 @@ they can be tested without starting processes.
 
 ## Secret boundary
 
-Passwords and sudo passwords may exist only in the visible auth process, its one-use direct
-channel and the owning session worker while being written to OpenSSH. Login-key passphrases use
-that same path. A passphrase for a newly generated key exists only in the visible setup process
-and its directly owned `ssh-keygen` ConPTY. All are excluded from MCP schemas, broker messages,
-profile configuration, normal exceptions and audit events. Host-key decisions use the isolated
-auth path even though they are not credentials.
+Connection credentials follow only
+`visible UI -> DirectAuth worker -> short-lived worker relay buffer -> Askpass stdout -> OpenSSH`.
+The relay is protected by a current-user-SID-only pipe plus a role-bound nonce/HMAC handshake.
+The existing `serverops-auth` entry point acts as the Askpass helper without putting a secret in
+the environment or process arguments. Passwords and key passphrases are excluded from MCP schemas,
+broker messages, profile configuration, normal results, exceptions and audit events. Host-key
+decisions use the same isolated path even though they are not credentials.
+
+Sudo remains a distinct, operation-authorized PTY path in the owning worker. Normal command and
+raw-terminal output never authorizes it, and interactive root-session startup requires a fresh
+nonce embedded in the worker-selected `sudo -p` prompt. A passphrase for a newly generated key
+exists only in the visible setup process and its directly owned `ssh-keygen` ConPTY.
+
+These boundaries do not claim protection from a fully compromised same-Windows-user process or
+from a malicious challenge genuinely emitted by the selected server's PAM stack. See
+[ADR 015](adr/015-windows-openssh-askpass-boundary.md).
 
 ## Verification layers
 
 - Pure unit tests: config, protocol envelopes, state machine, framing, buffers, path policy,
   redaction and audit schema.
-- Process tests: broker lifecycle, worker ownership, session rediscovery and IPC failures.
+- Process tests: broker lifecycle, worker ownership, session rediscovery, IPC failures and the
+  real `serverops-auth` entry point in Askpass mode.
 - Optional local Docker integration: OpenSSH, Bash state, disconnects, sudo and remote files;
   public CI does not provision this environment.
 - Manual Windows release check: visible setup/auth windows and user-driven confirmations.

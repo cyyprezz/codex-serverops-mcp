@@ -12,10 +12,12 @@ allowed to open the local sudo-password window. An unmanaged interactive `sudo` 
 until it is interrupted or times out. Elevation cannot grant a permission denied by the remote
 sudoers policy. Operators should use a restricted SSH account and narrow sudoers rules.
 
-Interactive sudo uses a deterministic prompt recognized by the existing authentication
-coordinator. A password is entered only in the separate visible local authentication process and
-travels over a one-use current-user pipe directly to the worker that owns OpenSSH. It is absent
-from the MCP schema, broker protocol, profile config, normal results and logs.
+Interactive sudo is not routed through OpenSSH Askpass because it occurs inside the established
+remote PTY. It is authorized only while an explicit `acquire` or elevation `exec` action is active.
+A password is entered only in the separate visible local authentication process and travels over
+a one-use current-user DirectAuth pipe directly to the worker that owns OpenSSH. It is absent from
+the MCP schema, broker protocol, profile config, environment, process arguments, normal results
+and logs. Matching output during `server_exec` or raw-terminal use does not authorize the window.
 
 Non-interactive mode always passes `sudo -n`. It does not silently fall back to an interactive
 prompt. `status` also uses a non-prompting validation. `release` calls `sudo -k` to invalidate the
@@ -51,6 +53,12 @@ operations and further guided elevation. They must be explicitly closed with
 `close_root_session` and their own session ID. Sudo timestamp sharing differs across server
 configurations; non-interactive root-session startup therefore requires a valid existing policy
 or NOPASSWD rule rather than assuming a normal session's cache will be shared.
+
+For interactive root startup, the worker generates a fresh random operation nonce and embeds it
+in a custom `sudo -p` prompt. Only a detected sudo prompt containing that nonce may reach
+DirectAuth. A remote banner that merely resembles `[sudo] password for ...` is ignored. This binds
+the startup prompt to that explicit root-session operation; server-side sudoers and PAM remain
+the authorization and challenge sources.
 
 ## Automated evidence and manual gate
 

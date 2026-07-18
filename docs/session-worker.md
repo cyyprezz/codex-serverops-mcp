@@ -6,11 +6,13 @@ does not import spike orchestration.
 ## Modules
 
 - `ssh/invocation.py` builds a Windows OpenSSH argument list from a validated profile.
-- `ssh/prompts.py` incrementally classifies host-key, password, key-passphrase and sudo prompts.
+- `ssh/auth_policy.py` classifies and bounds OpenSSH Askpass connection prompts by profile.
+- `ssh/prompts.py` incrementally recognizes terminal state and operation-authorized sudo prompts.
 - `ssh/framing.py` provides random command frames and a bounded incremental parser.
 - `terminal/contracts.py` defines the terminal capability required by a worker.
 - `worker/state.py` owns the explicit session state machine.
 - `worker/authentication.py` defines the worker-local one-use response capability.
+- `worker/askpass.py` owns the SID-only/HMAC relay between OpenSSH's helper and DirectAuth.
 - `worker/session.py` owns completed stateful commands and session lifecycle.
 - `worker/interactive.py` owns raw terminal actions independently from completed commands.
 - `ssh/target.py` resolves direct targets or delegates aliases to `ssh -G`.
@@ -56,13 +58,29 @@ reported as unknown rather than retried.
 
 ## Authentication boundary
 
-The session does not accept passwords as `open` or `execute` parameters. Prompt kinds are allowed
-only by the active local operation: SSH credentials during connection startup and sudo only during
-explicit elevation. Matching normal command or raw-terminal output is ignored. For an authorized
-prompt, a worker-local authentication coordinator receives a single-use `SecretInputSink`.
-The sink writes directly to the owned terminal and overwrites the supplied mutable byte buffer
-after use. The production visible auth process and SID-restricted one-use pipe implement that
-coordinator.
+The session does not accept passwords as `open` or `execute` parameters. During connection open,
+OpenSSH is forced to invoke the existing `serverops-auth` entry point as its Askpass helper. The
+helper proves its role to a worker-local SID-only named-pipe relay with the relay token and a
+nonce/HMAC handshake. A matching string in ConPTY output is not Askpass provenance and is ignored.
+
+Before DirectAuth opens the visible window, the relay applies the selected profile policy. Direct
+password allows host key plus account password; direct OpenSSH allows host key plus key
+passphrase; an alias follows OpenSSH configuration but allows only one credential answer. The
+worker accepts at most one complete host-key notice and one credential, then rejects every later
+connection prompt. The host-key notice stays intact and bounded so the UI shows its algorithm and
+SHA-256 fingerprint.
+
+The visible coordinator receives a one-use `SecretInputSink` over its separate DirectAuth
+channel. The response path is
+`UI -> worker -> short-lived relay buffer -> Askpass stdout -> OpenSSH`; MCP, broker, environment,
+process arguments and audit are excluded. Mutable response buffers are overwritten after use.
+
+Sudo deliberately remains on the PTY path because it occurs inside an established remote shell.
+Only an explicit interactive elevation operation may authorize that prompt. Interactive root
+startup uses a custom `sudo -p` prompt containing a fresh worker nonce; banner text without the
+nonce cannot trigger the window. Completed commands and raw-terminal actions never authorize
+connection prompts, and ordinary non-elevation output never authorizes sudo. See
+[ADR 015](adr/015-windows-openssh-askpass-boundary.md).
 
 ## Current verification
 

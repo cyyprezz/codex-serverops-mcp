@@ -45,9 +45,18 @@ Actions:
   session.
 - `close` requires `session_id` and closes only that worker/session.
 
-Opening a connection may cause `serverops-auth` to appear locally. The host-key window includes
-the OpenSSH algorithm and fingerprint. Auth input never becomes an MCP parameter or broker
-message, and output from a later command cannot open this window.
+Opening a connection may cause `serverops-auth` to appear locally. OpenSSH first invokes that
+existing entry point in Askpass-helper mode; a SID-only/HMAC worker relay verifies the invocation
+and the selected profile policy before the worker opens the visible DirectAuth window. A host-key
+window contains the complete bounded OpenSSH notice, including algorithm and SHA-256 fingerprint.
+
+A direct password profile can request only an account password, while a direct OpenSSH/key profile
+can request only a key passphrase. An SSH alias follows OpenSSH configuration and may request
+either, but the worker supplies at most one host-key answer and one credential answer. No later
+connection prompt is accepted after the credential. Auth input never becomes an MCP parameter,
+broker message, environment value, process argument or audit event. See
+[`authentication.md`](authentication.md) and
+[ADR 015](adr/015-windows-openssh-askpass-boundary.md).
 
 ## `server_exec`
 
@@ -90,7 +99,8 @@ close      optional timeout
 the desired output appears. `dropped_before_cursor` reports bounded-buffer loss.
 The `start` command receives the same redacted preview/hash audit treatment as `server_exec`.
 Arbitrary `write` input is never logged as command text. Credential-looking terminal output never
-opens a local authentication dialog.
+has OpenSSH Askpass provenance and cannot open a connection-authentication dialog. Ordinary raw
+terminal use also cannot authorize the sudo dialog.
 
 ## `server_files`
 
@@ -150,8 +160,10 @@ and fails rather than falling back to a prompt. `release` invalidates the remote
 `open_root_session` creates a second worker and a second OpenSSH connection running a dedicated
 root Bash. It returns that root session's own ID and its parent normal-session ID. Closing the
 normal session does not implicitly adopt or merge the root shell; call `close_root_session` with
-the root session ID. Structured file tools are disabled in root sessions so they cannot silently
-create root-owned files. See [`elevation.md`](elevation.md).
+the root session ID. In interactive mode the worker binds startup sudo to a fresh random nonce in
+its custom `sudo -p` prompt; a fake banner without that nonce is ignored. Structured file tools
+are disabled in root sessions so they cannot silently create root-owned files. See
+[`elevation.md`](elevation.md).
 
 ## Tool annotations
 
