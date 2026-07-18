@@ -191,11 +191,11 @@ def run(profile_name: str, expected_root: str) -> dict[str, object]:
         root_session_id = None
         checks.append("dedicated_root_session")
 
-        reconnected = services.server_connection("reconnect", session_id=session_id)
+        rediscovered = services.server_connection("rediscover", session_id=session_id)
         _expect(
-            reconnected.get("reconnected") is True
-            and reconnected.get("command_retried") is False,
-            "reconnect contract was not explicit about no retry",
+            rediscovered.get("rediscovered") is True
+            and rediscovered.get("command_retried") is False,
+            "rediscovery contract was not explicit about no retry",
         )
         checks.append("broker_session_rediscovery_no_retry")
 

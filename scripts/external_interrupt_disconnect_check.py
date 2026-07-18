@@ -91,12 +91,12 @@ def run(profile_name: str) -> dict[str, object]:
             _expect(error.code == "outcome_unknown", "disconnect returned the wrong error code")
         else:
             raise AssertionError("network command completed despite the scheduled connection reset")
-        reconnect = services.server_connection("reconnect", session_id=session_id)
+        rediscovery = services.server_connection("rediscover", session_id=session_id)
         _expect(
-            reconnect.get("state") == "lost"
-            and reconnect.get("reconnected") is True
-            and reconnect.get("command_retried") is False,
-            "lost-session reconnect did not preserve the no-retry contract",
+            rediscovery.get("state") == "lost"
+            and rediscovery.get("rediscovered") is True
+            and rediscovery.get("command_retried") is False,
+            "lost-session rediscovery did not preserve the no-retry contract",
         )
         checks.append("outcome_unknown_lost_and_command_not_retried")
         services.server_connection("close", session_id=session_id)

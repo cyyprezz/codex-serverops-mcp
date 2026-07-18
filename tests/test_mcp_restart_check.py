@@ -12,7 +12,7 @@ class McpRestartCheckTests(unittest.TestCase):
             {"sessions": [{"session_id": "sess-0123456789abcdef"}]},
             {"session_id": "sess-0123456789abcdef", "state": "ready"},
             {"output": "/opt/test\n"},
-            {"reconnected": True, "command_retried": False},
+            {"rediscovered": True, "command_retried": False},
             "/opt/test",
         )
 
@@ -23,7 +23,7 @@ class McpRestartCheckTests(unittest.TestCase):
                 {"sessions": [{"session_id": "sess-0123456789abcdef"}]},
                 {"session_id": "sess-0123456789abcdef", "state": "ready"},
                 {"output": "/opt/test\n"},
-                {"reconnected": True, "command_retried": True},
+                {"rediscovered": True, "command_retried": True},
                 "/opt/test",
             )
 

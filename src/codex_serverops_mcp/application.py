@@ -105,7 +105,7 @@ class ApplicationServices:
             self._forbid(profile_name, "profile_name", action)
             self._forbid(session_id, "session_id", action)
             return self._broker_request("session.list")
-        if action in {"status", "reconnect", "close"}:
+        if action in {"status", "rediscover", "close"}:
             self._forbid(profile_name, "profile_name", action)
             session = self._session_id(session_id)
             return self._broker_request(f"session.{action}", {"session_id": session})
@@ -237,7 +237,7 @@ class ApplicationServices:
             "session.open": "server_connection",
             "session.list": "server_connection",
             "session.status": "server_connection",
-            "session.reconnect": "server_connection",
+            "session.rediscover": "server_connection",
             "session.close": "server_connection",
             "session.exec": "server_exec",
             "session.terminal": "server_terminal",

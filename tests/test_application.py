@@ -100,7 +100,7 @@ class ApplicationServicesTests(unittest.TestCase):
         self.services.server_connection("open", profile_name="prod")
         self.services.server_connection("list")
         self.services.server_connection("status", session_id=session_id)
-        reconnected = self.services.server_connection("reconnect", session_id=session_id)
+        rediscovered = self.services.server_connection("rediscover", session_id=session_id)
         self.services.server_connection("close", session_id=session_id)
 
         self.assertEqual(
@@ -109,11 +109,11 @@ class ApplicationServicesTests(unittest.TestCase):
                 "session.open",
                 "session.list",
                 "session.status",
-                "session.reconnect",
+                "session.rediscover",
                 "session.close",
             ],
         )
-        self.assertEqual(reconnected["message_type"], "session.reconnect")
+        self.assertEqual(rediscovered["message_type"], "session.rediscover")
 
     def test_setup_actions_start_or_poll_only_the_local_coordinator(self) -> None:
         started = self.services.server_profile_setup(

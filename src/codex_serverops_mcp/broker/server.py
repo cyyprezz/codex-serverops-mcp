@@ -185,14 +185,14 @@ class BrokerServer:
                 "worker.status",
                 timeout=5,
             )
-        if message_type == "session.reconnect":
+        if message_type == "session.rediscover":
             self._require_fields(payload, {"session_id"})
             result = self._request_session(
                 self._session_id_value(payload),
                 "worker.status",
                 timeout=5,
             )
-            return {**result, "reconnected": True, "command_retried": False}
+            return {**result, "rediscovered": True, "command_retried": False}
         if message_type == "session.exec":
             self._require_fields(payload, {"session_id", "command"}, optional={"timeout"})
             session_id = self._session_id_value(payload)

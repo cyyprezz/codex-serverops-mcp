@@ -26,7 +26,7 @@ def verify_restart_state(
     listed: dict[str, object],
     status: dict[str, object],
     pwd: dict[str, object],
-    reconnect: dict[str, object],
+    rediscovery: dict[str, object],
     expected_cwd: str,
 ) -> None:
     sessions = listed.get("sessions")
@@ -43,7 +43,10 @@ def verify_restart_state(
         raise AssertionError("rediscovered session was not ready")
     if str(pwd.get("output", "")).strip() != expected_cwd:
         raise AssertionError("held Bash cwd did not survive MCP restart")
-    if reconnect.get("reconnected") is not True or reconnect.get("command_retried") is not False:
+    if (
+        rediscovery.get("rediscovered") is not True
+        or rediscovery.get("command_retried") is not False
+    ):
         raise AssertionError("MCP restart rediscovery did not preserve the no-retry contract")
 
 
@@ -97,12 +100,12 @@ async def run_check(wheel: Path, profile_name: str, expected_cwd: str) -> dict[s
                     "server_exec",
                     {"session_id": session_id, "command": "pwd"},
                 )
-                reconnect = await _call(
+                rediscovery = await _call(
                     second,
                     "server_connection",
-                    {"action": "reconnect", "session_id": session_id},
+                    {"action": "rediscover", "session_id": session_id},
                 )
-                verify_restart_state(session_id, listed, status, pwd, reconnect, expected_cwd)
+                verify_restart_state(session_id, listed, status, pwd, rediscovery, expected_cwd)
                 await _call(
                     second,
                     "server_connection",
