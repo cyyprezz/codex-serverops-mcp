@@ -21,6 +21,8 @@ UNIT = re.compile(r"^serverops-cut-[a-f0-9]{12}$")
 INTERRUPT_MARKER = "serverops-interrupt-started"
 AFTER_INTERRUPT_MARKER = "serverops-after-interrupt"
 SCHEDULER_COMMAND_TIMEOUT_SECONDS = 15
+FIREWALL_CLEANUP_TIMEOUT_SECONDS = 35
+FIREWALL_CLEANUP_POLL_SECONDS = 1
 NETWORK_COMMAND = (
     "i=0; while [ \"$i\" -lt 60 ]; do "
     "printf 'serverops-network-probe-%s\\n' \"$i\"; "
@@ -103,7 +105,6 @@ def _run(
         checks.append("outcome_unknown_lost_and_command_not_retried")
         services.server_connection("close", session_id=session_id)
         session_id = None
-        time.sleep(12)
         _verify_firewall_cleanup(services, profile_name, unit)
         checks.append("firewall_cleanup_confirmed")
         return {
@@ -210,18 +211,27 @@ def _verify_firewall_cleanup(
         opened = services.server_connection("open", profile_name=profile_name)
         session_id = str(opened["session_id"])
         quoted = shlex.quote(unit)
-        result = services.server_exec(
-            session_id,
-            (
-                f"systemctl list-units {quoted}.service {quoted}.timer "
-                "--all --no-legend --no-pager; "
-                f"systemctl list-timers {quoted}.timer --all --no-legend --no-pager"
-            ),
+        command = (
+            f"systemctl list-units {quoted}.service {quoted}.timer "
+            "--all --no-legend --no-pager; "
+            f"systemctl list-timers {quoted}.timer --all --no-legend --no-pager"
         )
-        _expect(
-            result.get("exit_code") == 0 and not str(result.get("output", "")).strip(),
-            "self-reverting firewall unit or timer remained after cleanup",
-        )
+        deadline = time.monotonic() + FIREWALL_CLEANUP_TIMEOUT_SECONDS
+        while True:
+            result = services.server_exec(session_id, command)
+            _expect(
+                result.get("exit_code") == 0,
+                "firewall cleanup inspection did not complete",
+            )
+            remaining = str(result.get("output", "")).strip()
+            if not remaining:
+                return
+            if time.monotonic() >= deadline:
+                raise AssertionError(
+                    "self-reverting firewall unit or timer remained after cleanup: "
+                    f"{remaining!r}"
+                )
+            time.sleep(FIREWALL_CLEANUP_POLL_SECONDS)
     finally:
         if session_id is not None:
             with suppress(Exception):

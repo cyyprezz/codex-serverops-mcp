@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 from codex_serverops_mcp.broker.errors import BrokerRemoteError
 from scripts.external_interrupt_disconnect_check import (
@@ -8,6 +9,7 @@ from scripts.external_interrupt_disconnect_check import (
     SCHEDULER_COMMAND_TIMEOUT_SECONDS,
     _output_matches_marker,
     _trigger_connection_reset,
+    _verify_firewall_cleanup,
     build_firewall_schedule_command,
     diagnose_unit,
     ensure_elevation,
@@ -34,6 +36,68 @@ class FakeElevationServices:
 
 
 class ExternalInterruptDisconnectTests(unittest.TestCase):
+    def test_firewall_cleanup_poll_tolerates_delayed_systemd_collection(self) -> None:
+        class Services:
+            def __init__(self) -> None:
+                self.outputs = iter(("unit still collecting", "\n"))
+                self.closed = False
+
+            def server_connection(self, action: str, **_parameters: str) -> dict[str, object]:
+                if action == "open":
+                    return {"session_id": "sess-0123456789abcdef"}
+                if action == "close":
+                    self.closed = True
+                    return {"status": "closed"}
+                raise AssertionError(f"unexpected connection action: {action}")
+
+            def server_exec(self, _session_id: str, _command: str) -> dict[str, object]:
+                return {"exit_code": 0, "output": next(self.outputs)}
+
+        services = Services()
+        with patch(
+            "scripts.external_interrupt_disconnect_check.time.sleep"
+        ) as sleep:
+            _verify_firewall_cleanup(
+                services,  # type: ignore[arg-type]
+                "fixture-test",
+                "serverops-cut-012345abcdef",
+            )
+
+        sleep.assert_called_once_with(1)
+        self.assertTrue(services.closed)
+
+    def test_firewall_cleanup_poll_remains_bounded_and_reports_residue(self) -> None:
+        class Services:
+            def __init__(self) -> None:
+                self.closed = False
+
+            def server_connection(self, action: str, **_parameters: str) -> dict[str, object]:
+                if action == "open":
+                    return {"session_id": "sess-0123456789abcdef"}
+                if action == "close":
+                    self.closed = True
+                    return {"status": "closed"}
+                raise AssertionError(f"unexpected connection action: {action}")
+
+            def server_exec(self, _session_id: str, _command: str) -> dict[str, object]:
+                return {"exit_code": 0, "output": "unit still collecting"}
+
+        services = Services()
+        with (
+            patch(
+                "scripts.external_interrupt_disconnect_check.time.monotonic",
+                side_effect=(0, 35),
+            ),
+            self.assertRaisesRegex(AssertionError, "unit still collecting"),
+        ):
+            _verify_firewall_cleanup(
+                services,  # type: ignore[arg-type]
+                "fixture-test",
+                "serverops-cut-012345abcdef",
+            )
+
+        self.assertTrue(services.closed)
+
     def test_disconnect_may_happen_during_scheduler_or_network_probe(self) -> None:
         class Services:
             def __init__(self, disconnect_call: int) -> None:
