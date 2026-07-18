@@ -130,6 +130,51 @@ class NamedPipeTests(unittest.TestCase):
         self.assertFalse(thread.is_alive())
         self.assertEqual(errors, [])
 
+    def test_connection_close_is_safe_from_multiple_threads(self) -> None:
+        from codex_serverops_mcp.ipc.named_pipe import (
+            NamedPipeListener,
+            connect_named_pipe,
+        )
+
+        listener = NamedPipeListener(self._pipe_path())
+        accepted: list[object] = []
+        accept_errors: list[BaseException] = []
+
+        def accept() -> None:
+            try:
+                accepted.append(listener.accept())
+            except BaseException as error:
+                accept_errors.append(error)
+
+        accept_thread = threading.Thread(target=accept)
+        accept_thread.start()
+        client = connect_named_pipe(listener.path)
+        accept_thread.join(timeout=3)
+        self.assertFalse(accept_thread.is_alive())
+        self.assertEqual(accept_errors, [])
+        self.assertEqual(len(accepted), 1)
+
+        errors: list[BaseException] = []
+        barrier = threading.Barrier(8)
+
+        def close_client() -> None:
+            try:
+                barrier.wait(timeout=3)
+                client.close()
+            except BaseException as error:
+                errors.append(error)
+
+        threads = [threading.Thread(target=close_client) for _ in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=3)
+
+        accepted[0].close()
+        listener.close()
+        self.assertTrue(all(not thread.is_alive() for thread in threads))
+        self.assertEqual(errors, [])
+
     def test_frame_deadline_allows_idle_but_rejects_a_partial_frame(self) -> None:
         import win32file
 
