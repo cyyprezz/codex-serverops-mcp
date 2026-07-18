@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows / Python 3.12
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.28"
+          python-version: "3.12"
+          activate-environment: true
+
+      - name: Test, lint and build
+        shell: pwsh
+        run: |
+          uv sync --locked --all-groups --python 3.12
+          $env:PYTHONPATH = "src"
+          python scripts/verify_release.py
+          python -m unittest discover -s tests -v
+          ruff check .
+          uv build
+
+      - name: Verify distributions and checkout-free commands
+        shell: pwsh
+        run: |
+          $wheel = Get-ChildItem -LiteralPath dist -Filter *.whl | Select-Object -First 1
+          $sdist = Get-ChildItem -LiteralPath dist -Filter *.tar.gz | Select-Object -First 1
+          python scripts/verify_distribution.py $wheel.FullName $sdist.FullName
+
+          $extract = Join-Path $env:RUNNER_TEMP "serverops-sdist"
+          New-Item -ItemType Directory -Force -Path $extract | Out-Null
+          tar -xf $sdist.FullName -C $extract
+          $source = Get-ChildItem -LiteralPath $extract -Directory | Select-Object -First 1
+          uv build --wheel --out-dir dist/from-sdist $source.FullName
+          $rebuilt = Get-ChildItem -LiteralPath dist/from-sdist -Filter *.whl | Select-Object -First 1
+          python scripts/verify_distribution.py $wheel.FullName $rebuilt.FullName
+
+          uvx --offline --from $wheel.FullName serverops-install --version
+          python scripts/stdio_surface_smoke.py $wheel.FullName --offline

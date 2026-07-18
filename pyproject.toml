@@ -1,0 +1,71 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "codex-serverops-mcp"
+version = "0.0.0.dev1"
+description = "Windows-first local MCP transport for stateful SSH server operations"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = "MIT"
+license-files = ["LICENSE"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Win32 (MS Windows)",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: Microsoft :: Windows :: Windows 10",
+  "Operating System :: Microsoft :: Windows :: Windows 11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: System :: Systems Administration",
+]
+dependencies = [
+  "mcp>=1.12,<2",
+  "pywin32>=312,<313; sys_platform == 'win32'",
+  "pywinpty>=3,<4",
+]
+
+[project.scripts]
+codex-serverops-mcp = "codex_serverops_mcp.server:main"
+serverops-install = "codex_serverops_mcp.installer.cli:main"
+serverops-broker = "codex_serverops_mcp.broker.server:main"
+serverops-setup = "codex_serverops_mcp.setup.app:main"
+serverops-auth = "codex_serverops_mcp.auth.app:main"
+serverops-session-worker = "codex_serverops_mcp.worker.process:main"
+
+[dependency-groups]
+dev = [
+  "ruff==0.15.22",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/codex_serverops_mcp"]
+exclude = ["src/codex_serverops_mcp/spike"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/.github",
+  "/docs",
+  "/scripts",
+  "/spike",
+  "/src",
+  "/tests",
+  "/LICENSE",
+  "/README.md",
+  "/SECURITY.md",
+  "/pyproject.toml",
+  "/uv.lock",
+]
+exclude = [
+  "/docs/manual-*-checklist.md",
+  "/docs/release-checklist.md",
+  "/docs/spike-results.md",
+  "/docs/test-reports",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]

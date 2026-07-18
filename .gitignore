@@ -1,0 +1,20 @@
+.venv/
+.uv-cache/
+.ruff_cache/
+__pycache__/
+*.py[cod]
+build/
+dist/
+*.egg-info/
+.spike-runtime/
+.product-smoke-runtime/
+.installer-smoke-runtime/
+.installer-uvx-smoke/
+.release-runtime/
+.setup-keygen-smoke/
+
+# Local-only development and release evidence
+docs/manual-*-checklist.md
+docs/release-checklist.md
+docs/spike-results.md
+docs/test-reports/
