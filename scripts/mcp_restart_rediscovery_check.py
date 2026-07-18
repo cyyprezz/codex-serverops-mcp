@@ -50,6 +50,14 @@ def verify_restart_state(
         raise AssertionError("MCP restart rediscovery did not preserve the no-retry contract")
 
 
+def command_completed_once(result: dict[str, object], marker: str) -> bool:
+    return (
+        result.get("status") == "completed"
+        and result.get("exit_code") == 0
+        and str(result.get("output", "")).strip() == marker
+    )
+
+
 async def run_check(wheel: Path, profile_name: str, expected_cwd: str) -> dict[str, object]:
     wheel = wheel.resolve()
     if not wheel.is_file():
@@ -85,8 +93,11 @@ async def run_check(wheel: Path, profile_name: str, expected_cwd: str) -> dict[s
                     "server_exec",
                     {"session_id": session_id, "command": "printf before-mcp-restart"},
                 )
-                if marker.get("output") != "before-mcp-restart":
-                    raise AssertionError("first MCP command did not complete exactly once")
+                if not command_completed_once(marker, "before-mcp-restart"):
+                    raise AssertionError(
+                        "first MCP command did not complete exactly once: "
+                        f"output={marker.get('output')!r}"
+                    )
 
             async with _mcp_session(parameters) as second:
                 listed = await _call(second, "server_connection", {"action": "list"})
