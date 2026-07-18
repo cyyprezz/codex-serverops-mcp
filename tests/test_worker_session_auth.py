@@ -50,7 +50,53 @@ class SlowCompletingAuthenticator(FixtureAuthenticator):
         )
 
 
+class RepeatedSudoTerminal(FakeTerminal):
+    def write(self, data: bytes) -> None:
+        super().write(data)
+        if b"repeated-sudo" in data:
+            prompt = b"[sudo] password for deploy: serverops-elevation-" + b"a" * 32
+            self.buffer.append(prompt + b"\n" + prompt + b"\n")
+        if data == b"\x1d" and self.block_commands:
+            token = TOKEN.findall(b"".join(self.writes))[-1]
+            nonce = self.shell_nonce or b"missing"
+            self.buffer.append(
+                b"\n__SERVEROPS_DEBUG_"
+                + token
+                + b"__\n__SERVEROPS_DEBUG_END_"
+                + token
+                + b"__\n__SERVEROPS_END_"
+                + token
+                + b"__:130\n__SERVEROPS_CWD_"
+                + token
+                + b"__:/opt/app\n__SERVEROPS_HEALTH_"
+                + token
+                + b"__:"
+                + nonce
+                + b"\n"
+            )
+
+
 class StatefulSshSessionAuthenticationTests(unittest.TestCase):
+    def test_repeated_sudo_prompt_is_interrupted_without_a_second_window(self) -> None:
+        terminal = RepeatedSudoTerminal()
+        authenticator = FixtureAuthenticator()
+        session = StatefulSshSession(terminal=terminal, authenticator=authenticator)
+        session.open(["ssh.exe"])
+        terminal.block_commands = True
+
+        result = session.execute(
+            "repeated-sudo",
+            timeout=1,
+            allow_sudo_prompt=True,
+            sudo_prompt_token="a" * 32,
+        )
+
+        self.assertEqual(result.exit_code, 130)
+        self.assertEqual(authenticator.kinds, [PromptKind.SUDO_PASSWORD])
+        self.assertEqual(terminal.writes.count(b"\x1d"), 1)
+        self.assertEqual(session.state.state, SessionState.READY)
+        session.close()
+
     def test_local_sudo_authentication_does_not_consume_remote_command_timeout(self) -> None:
         terminal = DeferredSudoTerminal()
         authenticator = SlowCompletingAuthenticator(terminal)

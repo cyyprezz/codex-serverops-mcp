@@ -26,6 +26,9 @@ and logs. Matching output during `server_exec` or raw-terminal use does not auth
 Time spent in that bounded local authentication window does not consume the remote command
 timeout. After a successful response, the remote sudo command still receives its configured
 timeout while the combined broker and Codex deadlines remain bounded.
+Each operation may open at most one local sudo window. If sudo requests the password again, the
+worker interrupts that command and returns a controlled failure; a timeout-recovery path never
+opens another authentication window.
 
 Non-interactive mode always passes `sudo -n`. It does not silently fall back to an interactive
 prompt. `status` also uses a non-prompting validation. `release` calls `sudo -k` to invalidate the

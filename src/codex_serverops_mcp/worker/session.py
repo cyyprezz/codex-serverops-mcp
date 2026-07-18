@@ -94,6 +94,9 @@ class StatefulSshSession:
                 if allow_sudo_prompt
                 else frozenset()
             )
+            authentication_starting = (
+                self._single_authentication_gate() if allowed_prompts else None
+            )
             deadline = time.monotonic() + timeout
             while time.monotonic() < deadline:
                 if failure_check is not None:
@@ -102,6 +105,7 @@ class StatefulSshSession:
                     min(0.25, deadline - time.monotonic()),
                     allowed_prompt_kinds=allowed_prompts,
                     sudo_prompt_token=sudo_prompt_token,
+                    authentication_starting=authentication_starting,
                 )
                 if self._detector.ready:
                     if failure_check is not None:
@@ -161,6 +165,9 @@ class StatefulSshSession:
                 if allow_sudo_prompt
                 else frozenset()
             )
+            authentication_starting = (
+                self._single_authentication_gate() if allowed_prompts else None
+            )
             deadline = started + timeout
 
             def preserve_remote_timeout(authentication_seconds: float) -> None:
@@ -172,6 +179,7 @@ class StatefulSshSession:
                     min(0.25, deadline - time.monotonic()),
                     allowed_prompt_kinds=allowed_prompts,
                     sudo_prompt_token=sudo_prompt_token,
+                    authentication_starting=authentication_starting,
                     authentication_completed=preserve_remote_timeout,
                 )
                 if data:
@@ -210,7 +218,6 @@ class StatefulSshSession:
                 recovered = self._wait_for_recovery(
                     parser,
                     timeout=RECOVERY_TIMEOUT_SECONDS,
-                    allowed_prompt_kinds=allowed_prompts,
                 )
             except FrameProtocolError as error:
                 self._lose_executing_session()
@@ -264,6 +271,7 @@ class StatefulSshSession:
         *,
         allowed_prompt_kinds: frozenset[PromptKind] = frozenset(),
         sudo_prompt_token: str | None = None,
+        authentication_starting: Callable[[], bool] | None = None,
         authentication_completed: Callable[[float], None] | None = None,
     ) -> bytes:
         result = self.terminal.wait_for_data(self._cursor, max(0, timeout))
@@ -280,6 +288,8 @@ class StatefulSshSession:
                 and sudo_prompt_token is not None
                 and sudo_prompt_token not in event.prompt
             ):
+                continue
+            if authentication_starting is not None and not authentication_starting():
                 continue
             self.state.begin_authentication()
             authentication_started = time.monotonic()
@@ -378,19 +388,33 @@ class StatefulSshSession:
         parser: CommandFrameParser,
         *,
         timeout: float,
-        allowed_prompt_kinds: frozenset[PromptKind],
     ) -> bool:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             data = self._read_and_handle_prompts(
                 min(0.25, deadline - time.monotonic()),
-                allowed_prompt_kinds=allowed_prompt_kinds,
             )
             if data and parser.feed(data) is not None:
                 return True
             if not self.terminal.running:
                 return False
         return False
+
+    def _single_authentication_gate(self) -> Callable[[], bool]:
+        authentication_started = False
+        repeated_prompt_interrupted = False
+
+        def permit() -> bool:
+            nonlocal authentication_started, repeated_prompt_interrupted
+            if not authentication_started:
+                authentication_started = True
+                return True
+            if not repeated_prompt_interrupted:
+                self.terminal.write(REMOTE_VINTR_BYTE)
+                repeated_prompt_interrupted = True
+            return False
+
+        return permit
 
     def _lose_executing_session(self) -> None:
         if self.state.state is SessionState.EXECUTING:
