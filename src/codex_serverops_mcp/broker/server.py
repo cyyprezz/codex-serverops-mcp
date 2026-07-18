@@ -188,8 +188,19 @@ class BrokerServer:
             )
         if message_type == "session.rediscover":
             self._require_fields(payload, {"session_id"})
+            session_id = self._session_id_value(payload)
+            record = self.supervisor.get(session_id)
+            if record.state == "lost":
+                return {
+                    **self._session_metadata(
+                        record,
+                        {"pid": record.worker_pid, "state": "lost"},
+                    ),
+                    "rediscovered": True,
+                    "command_retried": False,
+                }
             result = self._request_session(
-                self._session_id_value(payload),
+                session_id,
                 "worker.status",
                 timeout=5,
             )

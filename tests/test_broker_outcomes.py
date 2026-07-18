@@ -16,6 +16,7 @@ from codex_serverops_mcp.broker.errors import (
 )
 from codex_serverops_mcp.broker.model import SessionRecord
 from codex_serverops_mcp.broker.outcomes import uncertain_outcome_code
+from codex_serverops_mcp.broker.server import BrokerServer
 from codex_serverops_mcp.broker.supervisor import WorkerHandle, WorkerSupervisor
 from codex_serverops_mcp.broker.timeouts import (
     DEFAULT_BROKER_RESPONSE_TIMEOUT_SECONDS,
@@ -59,6 +60,43 @@ class _Process:
 
 
 class BrokerOutcomeTests(unittest.TestCase):
+    def test_rediscover_returns_preserved_lost_metadata_without_worker_request(self) -> None:
+        session_id = "sess-0123456789abcdef"
+        record = SessionRecord(
+            session_id,
+            "prod",
+            1234,
+            r"\\.\pipe\codex-serverops-worker-test",
+            "lost",
+            1.0,
+            2.0,
+            ssh_user="deploy",
+            effective_user="deploy",
+        )
+
+        class LostSupervisor:
+            def get(self, requested_session_id: str) -> SessionRecord:
+                self.requested_session_id = requested_session_id
+                return record
+
+            def request(self, *_args, **_kwargs):
+                raise AssertionError("lost rediscovery must not request the dead worker")
+
+        supervisor = LostSupervisor()
+        server = object.__new__(BrokerServer)
+        server.supervisor = supervisor  # type: ignore[assignment]
+
+        result = server._handle_request(  # noqa: SLF001 - broker dispatch contract
+            "session.rediscover",
+            {"session_id": session_id},
+        )
+
+        self.assertEqual(supervisor.requested_session_id, session_id)
+        self.assertEqual(result["state"], "lost")
+        self.assertEqual(result["pid"], 1234)
+        self.assertTrue(result["rediscovered"])
+        self.assertFalse(result["command_retried"])
+
     def test_only_effectful_requests_map_to_specific_unknown_codes(self) -> None:
         self.assertEqual(uncertain_outcome_code("session.exec"), "outcome_unknown")
         self.assertEqual(
