@@ -38,6 +38,12 @@ class ReleaseContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ReleaseContractError, "committed manual release evidence"):
             verify_release(tag="v0.1.0")
 
+    def test_stable_tag_can_use_explicit_automated_only_policy(self) -> None:
+        self.assertEqual(
+            verify_release(tag="v0.1.0", require_manual_evidence=False),
+            "0.1.0",
+        )
+
     def test_distribution_exposes_only_six_product_commands(self) -> None:
         self.assertEqual(
             EXPECTED_COMMANDS,

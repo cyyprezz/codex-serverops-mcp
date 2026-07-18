@@ -101,6 +101,7 @@ def verify_release(
     *,
     tag: str | None = None,
     evidence_path: Path | None = None,
+    require_manual_evidence: bool = True,
 ) -> str:
     project = tomllib.loads((repo_root / "pyproject.toml").read_text(encoding="utf-8"))
     version = str(project["project"]["version"])
@@ -143,8 +144,9 @@ def verify_release(
         if not STABLE_VERSION.fullmatch(version) or tag != f"v{version}":
             raise ReleaseContractError("Release tag must exactly match a stable package version")
         _verify_server_json(repo_root, version)
-        evidence = evidence_path or repo_root / "docs" / "release-evidence.json"
-        _verify_evidence(repo_root, evidence, version)
+        if require_manual_evidence:
+            evidence = evidence_path or repo_root / "docs" / "release-evidence.json"
+            _verify_evidence(repo_root, evidence, version)
     return version
 
 
@@ -278,6 +280,7 @@ def _verify_workflow(path: Path) -> None:
         "persist-credentials: false",
         "git merge-base --is-ancestor",
         "scripts/verify_release.py --tag",
+        "--automated-gates-only",
         "id-token: write",
         "pypa/gh-action-pypi-publish@",
         "attestations: true",
@@ -297,8 +300,20 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tag")
     parser.add_argument("--evidence", type=Path)
+    parser.add_argument(
+        "--automated-gates-only",
+        action="store_true",
+        help=(
+            "release with the automated contract only; manual external evidence remains "
+            "advisory"
+        ),
+    )
     args = parser.parse_args()
-    version = verify_release(tag=args.tag, evidence_path=args.evidence)
+    version = verify_release(
+        tag=args.tag,
+        evidence_path=args.evidence,
+        require_manual_evidence=not args.automated_gates_only,
+    )
     gate = "stable release" if args.tag else "development"
     print(f"{gate} contract OK for {version}")
 

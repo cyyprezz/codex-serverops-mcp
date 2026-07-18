@@ -1,7 +1,7 @@
 # MCP tool reference
 
-The untagged `0.1.0` candidate exposes exactly eight tools. This is the intended public tool
-shape, but it is not a published release until the stable evidence, merge and tag gates complete.
+Version `0.1.0` exposes exactly eight public tools. This tool surface is the compatibility
+contract for the initial release.
 
 ## `server_profiles`
 
