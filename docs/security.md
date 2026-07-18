@@ -84,12 +84,15 @@ public_key_install_failed
 public_key_install_outcome_unknown
 ```
 
-These events allow only the profile name, result status and, when a profile is available, its
-connection type, authentication mode, environment label, terminal/file capability flags,
-elevation mode and root-session flag. They omit the full host or IP address, full key path, public
-key line, configuration content and all credentials. Removal uses only the bounded non-secret
-profile summary available before deletion. If this local audit write fails, the profile operation
-keeps its real outcome and returns `audit.logged = false`.
+These events intentionally record the local profile name verbatim, plus result status and, when a
+profile is available, its connection type, authentication mode, environment category,
+terminal/file capability flags, elevation mode and root-session flag. Operators must therefore
+choose a non-sensitive profile name rather than an IP address, hostname, account or customer
+secret. Standard environment labels are allowlisted; every other free-text value is recorded only
+as `custom`. Events omit the actual host or IP field, full key path, public key line, configuration
+content and all credentials. Removal uses only the bounded non-secret profile summary available
+before deletion. If this local audit write fails, the profile operation keeps its real outcome and
+returns `audit.logged = false`.
 
 ## Operational guidance
 

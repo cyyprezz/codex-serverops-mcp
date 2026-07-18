@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from codex_serverops_mcp.config import (
@@ -72,6 +73,23 @@ class ProfileAuditTests(unittest.TestCase):
         status = audit.record("profile_created", "prod", profile=sensitive_profile())
 
         self.assertFalse(status.logged)
+
+    def test_free_text_environment_is_redacted_to_a_bounded_category(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            audit = ProfileAudit(AuditLogger(Path(directory)))
+            profile = replace(
+                sensitive_profile(),
+                environment="password=hunter2 203.0.113.9 customer-code",
+            )
+
+            audit.record("profile_updated", "prod", profile=profile)
+
+            line = next(Path(directory).glob("*.jsonl")).read_text(encoding="utf-8")
+            event = json.loads(line)
+            self.assertEqual(event["environment"], "custom")
+            self.assertNotIn("hunter2", line)
+            self.assertNotIn("203.0.113.9", line)
+            self.assertNotIn("customer-code", line)
 
     def test_combined_status_preserves_prior_audit_failure(self) -> None:
         result = SetupAuditStatus(True).attach({"audit": {"logged": False}, "status": "ok"})

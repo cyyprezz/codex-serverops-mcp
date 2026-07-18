@@ -6,6 +6,10 @@ from codex_serverops_mcp.config import ServerProfile
 
 from .audit import AuditLogger
 
+AUDIT_ENVIRONMENTS = frozenset(
+    {"unspecified", "test", "development", "staging", "production"}
+)
+
 
 @dataclass(frozen=True, slots=True)
 class SetupAuditStatus:
@@ -65,7 +69,9 @@ def _safe_profile_capabilities(profile: ServerProfile) -> dict[str, object]:
     return {
         "connection_type": profile.connection_type.value,
         "authentication": profile.authentication.value,
-        "environment": profile.environment,
+        "environment": (
+            profile.environment if profile.environment in AUDIT_ENVIRONMENTS else "custom"
+        ),
         "terminal_enabled": profile.allow_terminal,
         "file_read_enabled": profile.allow_file_read,
         "file_write_enabled": profile.allow_file_write,
