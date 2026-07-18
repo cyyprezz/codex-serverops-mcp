@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
 from codex_serverops_mcp.config import ElevationMode, ServerProfile
+from codex_serverops_mcp.errors import ServerOpsError
 from codex_serverops_mcp.ssh.prompts import operation_sudo_prompt
 
 from .errors import ElevationError
@@ -53,11 +54,26 @@ class ElevationService:
         command = "/usr/bin/sudo -n -v"
         if token is not None:
             command = f"/usr/bin/sudo -p '{operation_sudo_prompt('elevation', token)}' -v"
-        result = self._run(command, self.profile.command_timeout_seconds, token)
+        try:
+            result = self._run(command, self.profile.command_timeout_seconds, token)
+        except ServerOpsError as error:
+            if error.code != "command_timed_out" or not self._cache_is_active():
+                raise
+            return self._summary("acquired", active=True)
         if self._exit_code(result) != 0:
             code = "elevation_authentication_required" if non_interactive else "elevation_failed"
             raise ElevationError(code, "sudo elevation could not be acquired")
         return self._summary("acquired", active=True)
+
+    def _cache_is_active(self) -> bool:
+        try:
+            result = self._run(
+                "/usr/bin/sudo -n -v",
+                min(10, self.profile.command_timeout_seconds),
+            )
+            return self._exit_code(result) == 0
+        except ServerOpsError:
+            return False
 
     def _release(self) -> dict[str, object]:
         result = self._run(

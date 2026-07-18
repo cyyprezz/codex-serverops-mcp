@@ -29,6 +29,9 @@ timeout while the combined broker and Codex deadlines remain bounded.
 Each operation may open at most one local sudo window. If sudo requests the password again, the
 worker interrupts that command and returns a controlled failure; a timeout-recovery path never
 opens another authentication window.
+If an `acquire` command reaches its timeout after verified shell recovery, ServerOps performs one
+non-prompting `sudo -n -v` reconciliation. It reports success only when that probe confirms the
+requested active cache; an inactive or unverifiable cache preserves the original timeout failure.
 
 Non-interactive mode always passes `sudo -n`. It does not silently fall back to an interactive
 prompt. `status` also uses a non-prompting validation. `release` calls `sudo -k` to invalidate the

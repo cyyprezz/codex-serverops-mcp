@@ -12,6 +12,7 @@ from codex_serverops_mcp.config import (
 from codex_serverops_mcp.elevation.errors import ElevationError
 from codex_serverops_mcp.elevation.service import ElevationService
 from codex_serverops_mcp.elevation.shell import build_elevated_shell_command
+from codex_serverops_mcp.worker.errors import CommandTimedOut
 
 BEGIN = re.compile(r"__SERVEROPS_ELEVATED_BEGIN_[0-9a-f]{32}__")
 END = re.compile(r"__SERVEROPS_ELEVATED_END_[0-9a-f]{32}__")
@@ -60,6 +61,19 @@ class FakeRunner:
         }
 
 
+class TimedOutAcquireRunner(FakeRunner):
+    def __call__(
+        self,
+        command: str,
+        timeout: float | None,
+        sudo_prompt_token: str | None,
+    ) -> dict[str, object]:
+        if not self.calls:
+            self.calls.append((command, timeout, sudo_prompt_token))
+            raise CommandTimedOut("acquire timed out after verified shell recovery")
+        return super().__call__(command, timeout, sudo_prompt_token)
+
+
 class ElevationServiceTests(unittest.TestCase):
     def test_disabled_mode_reports_status_and_rejects_guided_actions(self) -> None:
         runner = FakeRunner()
@@ -82,6 +96,26 @@ class ElevationServiceTests(unittest.TestCase):
         self.assertEqual(captured.exception.code, "elevation_authentication_required")
         self.assertEqual(runner.calls[0][0], "/usr/bin/sudo -n -v")
         self.assertIsNone(runner.calls[0][2])
+
+    def test_acquire_reconciles_timeout_only_when_cache_is_confirmed_active(self) -> None:
+        runner = TimedOutAcquireRunner(exit_code=0)
+        service = ElevationService(profile(ElevationMode.INTERACTIVE), "deploy", runner)
+
+        result = service.handle("acquire", {})
+
+        self.assertEqual(result["status"], "acquired")
+        self.assertTrue(result["active"])
+        self.assertRegex(runner.calls[0][2] or "", r"^[0-9a-f]{32}$")
+        self.assertEqual(runner.calls[1], ("/usr/bin/sudo -n -v", 10, None))
+
+    def test_acquire_preserves_timeout_when_cache_is_not_active(self) -> None:
+        runner = TimedOutAcquireRunner(exit_code=1)
+        service = ElevationService(profile(ElevationMode.INTERACTIVE), "deploy", runner)
+
+        with self.assertRaises(CommandTimedOut):
+            service.handle("acquire", {})
+
+        self.assertEqual(runner.calls[1], ("/usr/bin/sudo -n -v", 10, None))
 
     def test_elevated_exec_is_encoded_framed_and_preserves_user_exit(self) -> None:
         runner = FakeRunner(exit_code=7, elevated_output="root-output\n")
