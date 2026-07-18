@@ -134,9 +134,14 @@ class StatefulSshSession:
         *,
         timeout: float = 60,
         allow_sudo_prompt: bool = False,
+        sudo_prompt_token: str | None = None,
     ) -> ExecutionResult:
         if not command or "\x00" in command:
             raise ValueError("command must be non-empty text without NUL")
+        if allow_sudo_prompt != (sudo_prompt_token is not None):
+            raise ValueError(
+                "sudo authentication requires one operation-bound prompt token"
+            )
         self.state.require(SessionState.READY)
         token = new_token()
         parser = CommandFrameParser(
@@ -161,6 +166,7 @@ class StatefulSshSession:
                 data = self._read_and_handle_prompts(
                     min(0.25, deadline - time.monotonic()),
                     allowed_prompt_kinds=allowed_prompts,
+                    sudo_prompt_token=sudo_prompt_token,
                 )
                 if data:
                     try:

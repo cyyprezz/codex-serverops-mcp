@@ -72,6 +72,11 @@ def run() -> dict[str, object]:
             "printf 'elevated-user='; id -u; exit 7",
             non_interactive=True,
         )
+        hostile_shell_state = (
+            "PATH=/invalid; "
+            "sudo() { printf 'fake sudo invoked\\n' >&2; return 99; }; "
+            "base64() { printf 'fake base64 invoked\\n' >&2; return 98; }; "
+        )
         completed = _run(
             [
                 "docker",
@@ -83,7 +88,7 @@ def run() -> dict[str, object]:
                 "--noprofile",
                 "--norc",
                 "-c",
-                built.command,
+                hostile_shell_state + built.command,
             ],
             check=False,
         )

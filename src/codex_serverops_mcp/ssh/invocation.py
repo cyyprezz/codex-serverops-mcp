@@ -68,7 +68,7 @@ def build_ssh_arguments(
             arguments.extend(("-i", profile.identity_file, "-o", "IdentitiesOnly=yes"))
         target = profile.ssh_host
 
-    remote_command = ["bash", "--noprofile", "--norc", "-i"]
+    remote_command = ["/bin/bash", "--noprofile", "--norc", "-i"]
     if root_session:
         if (
             profile.elevation_mode is ElevationMode.INTERACTIVE
@@ -83,6 +83,22 @@ def build_ssh_arguments(
             if profile.elevation_mode is ElevationMode.NON_INTERACTIVE
             else ["-p", root_sudo_prompt]
         )
-        remote_command = ["sudo", *non_interactive, *prompt, "-i", "--", *remote_command]
+        remote_command = [
+            "/usr/bin/sudo",
+            *non_interactive,
+            *prompt,
+            "-i",
+            "--",
+            "/usr/bin/env",
+            "-u",
+            "BASH_ENV",
+            "-u",
+            "ENV",
+            "-u",
+            "SHELLOPTS",
+            "-u",
+            "BASHOPTS",
+            *remote_command,
+        ]
     arguments.extend(("--", target, *remote_command))
     return arguments

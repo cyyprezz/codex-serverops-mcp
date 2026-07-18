@@ -29,7 +29,7 @@ def shell_bootstrap_wrapper(shell_nonce: str, token: str) -> str:
     """Initialize the non-exported original-shell guard and prove Bash control."""
     _validate_token(shell_nonce, "shell nonce")
     body = (
-        "builtin unset PROMPT_COMMAND\n"
+        "builtin unset PROMPT_COMMAND PS0\n"
         "builtin export PS1='' PS2='' PS3='' PS4=''\n"
         f"builtin readonly {_SHELL_NONCE_VARIABLE}='{shell_nonce}'"
     )
@@ -100,6 +100,12 @@ def _shell_health_condition(shell_nonce: str) -> str:
         f"*'{_SHELL_NONCE_VARIABLE}=\"{shell_nonce}\"'* ]]"
         " && [[ $(builtin enable -p printf 2>/dev/null) == 'enable printf' ]]"
         " && [[ $(builtin enable -p pwd 2>/dev/null) == 'enable pwd' ]]"
+        " && [[ -z ${PROMPT_COMMAND+x} ]]"
+        " && [[ -z ${PS0+x} ]]"
+        " && [[ ${PS1-} == '' ]]"
+        " && [[ ${PS2-} == '' ]]"
+        " && [[ ${PS3-} == '' ]]"
+        " && [[ ${PS4-} == '' ]]"
     )
 
 

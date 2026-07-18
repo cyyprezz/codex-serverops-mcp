@@ -24,6 +24,7 @@ class FakeSession:
         self.open_arguments: list[str] = []
         self.open_allows_sudo = False
         self.execute_allows_sudo: list[bool] = []
+        self.execute_sudo_tokens: list[str | None] = []
         self.closed = False
         self.open_environment: dict[str, str] = {}
         self.open_sudo_prompt_token: str | None = None
@@ -54,9 +55,11 @@ class FakeSession:
         *,
         timeout: float,
         allow_sudo_prompt: bool = False,
+        sudo_prompt_token: str | None = None,
     ) -> ExecutionResult:
         self.state.require(SessionState.READY)
         self.execute_allows_sudo.append(allow_sudo_prompt)
+        self.execute_sudo_tokens.append(sudo_prompt_token)
         return ExecutionResult(
             output="0" if command == "id -u" else f"ran:{command}",
             exit_code=0,
@@ -158,6 +161,9 @@ class WorkerSessionServiceTests(unittest.TestCase):
             self.assertIn(str(known_hosts.resolve()), " ".join(sessions[0].open_arguments))
             self.assertEqual(auth_targets[0].host, "192.0.2.20")
             self.assertEqual(sessions[0].execute_allows_sudo, [False, True])
+            self.assertIsNone(sessions[0].execute_sudo_tokens[0])
+            elevation_token = sessions[0].execute_sudo_tokens[1]
+            self.assertRegex(elevation_token or "", r"^[0-9a-f]{32}$")
             self.assertEqual(sessions[0].open_environment["SSH_ASKPASS_REQUIRE"], "force")
             self.assertTrue(relays[0].closed)
             self.assertTrue(inspect_path_security(str(known_hosts)).current_user_only)
@@ -207,7 +213,7 @@ class WorkerSessionServiceTests(unittest.TestCase):
 
             self.assertEqual(opened["effective_user"], "root")
             self.assertTrue(opened["root_session"])
-            self.assertIn("sudo -n -i", " ".join(sessions[0].open_arguments))
+            self.assertIn("/usr/bin/sudo -n -i", " ".join(sessions[0].open_arguments))
             self.assertFalse(sessions[0].open_allows_sudo)
             self.assertIsNone(sessions[0].open_sudo_prompt_token)
             with self.assertRaises(RemoteFileError) as captured:

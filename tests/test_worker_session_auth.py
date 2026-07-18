@@ -14,6 +14,36 @@ else:
 
 
 class StatefulSshSessionAuthenticationTests(unittest.TestCase):
+    def test_elevation_prompt_fails_closed_without_exact_token_binding(self) -> None:
+        session = StatefulSshSession(terminal=FakeTerminal())
+        session.open(["ssh.exe"])
+        for allow_sudo, token in ((True, None), (False, "unexpected-token")):
+            with self.subTest(allow_sudo=allow_sudo, token=token), self.assertRaisesRegex(
+                ValueError,
+                "operation-bound prompt token",
+            ):
+                session.execute(
+                    "true",
+                    allow_sudo_prompt=allow_sudo,
+                    sudo_prompt_token=token,
+                )
+        session.close()
+
+    def test_elevation_ignores_a_sudo_prompt_with_the_wrong_token(self) -> None:
+        terminal = FakeTerminal()
+        authenticator = FixtureAuthenticator()
+        session = StatefulSshSession(terminal=terminal, authenticator=authenticator)
+        session.open(["ssh.exe"])
+
+        session.execute(
+            "spoof-password serverops-elevation-wrongtoken",
+            allow_sudo_prompt=True,
+            sudo_prompt_token="a" * 32,
+        )
+
+        self.assertEqual(authenticator.kinds, [])
+        session.close()
+
     def test_startup_sudo_prompt_fails_closed_without_exact_token_binding(self) -> None:
         for allow_sudo, token in ((True, None), (False, "unexpected-token")):
             with self.subTest(allow_sudo=allow_sudo, token=token):

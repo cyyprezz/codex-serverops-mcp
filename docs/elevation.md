@@ -14,6 +14,11 @@ sudoers policy. Operators should use a restricted SSH account and narrow sudoers
 
 Interactive sudo is not routed through OpenSSH Askpass because it occurs inside the established
 remote PTY. It is authorized only while an explicit `acquire` or elevation `exec` action is active.
+A fresh random operation token is embedded in that action's custom `sudo -p` text, and the worker
+accepts only the matching prompt. A function, changed `PATH`, prompt hook or ordinary output that
+merely resembles sudo therefore cannot receive the protected response. Guided operations invoke
+Ubuntu's `/usr/bin/sudo` directly; elevated Bash starts through absolute system programs with
+inherited Bash startup variables removed.
 A password is entered only in the separate visible local authentication process and travels over
 a one-use current-user DirectAuth pipe directly to the worker that owns OpenSSH. It is absent from
 the MCP schema, broker protocol, profile config, environment, process arguments, normal results
@@ -41,6 +46,10 @@ The command limit is 131072 UTF-8 bytes and timeout range is 0.1 through 3600 se
 response identifies `effective_user = root` and `elevated = true`. It intentionally omits `cwd`,
 because a one-shot elevated Bash does not change the held normal shell's directory.
 
+The held shell health record also requires `PROMPT_COMMAND` and `PS0` to remain unset and
+`PS1` through `PS4` to remain empty. Changing those prompt hooks deliberately loses the session
+instead of allowing a later privileged operation to inherit ambiguous prompt behavior.
+
 ## Dedicated root session
 
 `open_root_session` starts a new worker, a new OpenSSH connection and `sudo -i` Bash. The worker
@@ -54,7 +63,7 @@ operations and further guided elevation. They must be explicitly closed with
 configurations; non-interactive root-session startup therefore requires a valid existing policy
 or NOPASSWD rule rather than assuming a normal session's cache will be shared.
 
-For interactive root startup, the worker generates a fresh random operation nonce and embeds it
+For interactive root startup, the worker likewise generates a fresh random operation nonce and embeds it
 in a custom `sudo -p` prompt. Only a detected sudo prompt containing that nonce may reach
 DirectAuth. A remote banner that merely resembles `[sudo] password for ...` is ignored. This binds
 the startup prompt to that explicit root-session operation; server-side sudoers and PAM remain

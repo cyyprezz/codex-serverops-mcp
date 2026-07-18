@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from codex_serverops_mcp.auth.model import AuthTargetContext
 from codex_serverops_mcp.config import Authentication, ConnectionType, ServerProfile
 from codex_serverops_mcp.ssh.auth_policy import ConnectionPromptPolicy
-from codex_serverops_mcp.ssh.prompts import PromptEvent, PromptKind
+from codex_serverops_mcp.ssh.prompts import PromptEvent, PromptKind, operation_sudo_prompt
 from codex_serverops_mcp.worker.askpass import OpenSshAskpassRelay
 from codex_serverops_mcp.worker.authentication import SecretInputSink
 from codex_serverops_mcp.worker.session import StatefulSshSession
@@ -117,9 +117,13 @@ def probe_product_session_core(
         current = password_session.execute("pwd")
         if changed.cwd != "/opt/app" or current.output.strip() != "/opt/app":
             raise AssertionError("product session did not preserve its working directory")
+        sudo_token = "a" * 32
         elevated = password_session.execute(
-            "sudo -k; sudo -v; sudo -n id -u",
+            "/usr/bin/sudo -k; "
+            f"/usr/bin/sudo -p '{operation_sudo_prompt('elevation', sudo_token)}' -v; "
+            "/usr/bin/sudo -n id -u",
             allow_sudo_prompt=True,
+            sudo_prompt_token=sudo_token,
         )
         if elevated.exit_code != 0 or not elevated.output.strip().endswith("0"):
             raise AssertionError("product session sudo probe failed")

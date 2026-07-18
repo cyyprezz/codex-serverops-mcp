@@ -63,9 +63,10 @@ enough.
 
 `server_exec` and `server_terminal` output can never invoke Askpass or authorize a connection
 dialog. Sudo is intentionally separate: only an explicit interactive elevation operation may
-authorize a PTY sudo prompt. An interactive root-session startup additionally binds its custom
-`sudo -p` text to a fresh random operation nonce; a matching-looking banner without that nonce is
-ignored. Non-interactive elevation always uses `sudo -n`.
+authorize a PTY sudo prompt, and every interactive `acquire`, elevated `exec` and root-session
+startup binds its custom `sudo -p` text to a fresh random operation nonce. A matching-looking
+banner without the exact current nonce is ignored. Guided operations resolve the Ubuntu system
+sudo by absolute path; non-interactive elevation always uses `sudo -n`.
 
 ## Outcomes and limits
 

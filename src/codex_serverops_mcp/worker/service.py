@@ -20,6 +20,7 @@ from codex_serverops_mcp.files.errors import RemoteFileError
 from codex_serverops_mcp.ipc.security import secure_path_for_current_user
 from codex_serverops_mcp.ssh.auth_policy import ConnectionPromptPolicy
 from codex_serverops_mcp.ssh.invocation import build_ssh_arguments
+from codex_serverops_mcp.ssh.prompts import operation_sudo_prompt
 from codex_serverops_mcp.ssh.target import ResolvedSshTarget, find_windows_ssh, resolve_ssh_target
 
 from .askpass import OpenSshAskpassRelay
@@ -98,7 +99,7 @@ class WorkerSessionService:
         root_sudo_prompt = (
             None
             if root_sudo_token is None
-            else f"[sudo] password for %u: serverops-root-{root_sudo_token}"
+            else operation_sudo_prompt("root", root_sudo_token)
         )
         self.profile = profile
         self.target = target
@@ -179,16 +180,16 @@ class WorkerSessionService:
                 "guided sudo actions are unavailable inside a root session",
             )
         assert self.target is not None
-        allow_sudo_prompt = (
-            profile.elevation_mode is ElevationMode.INTERACTIVE
-            and action in {"acquire", "exec"}
-        )
-
-        def run_elevation(command: str, timeout: float | None) -> dict[str, object]:
+        def run_elevation(
+            command: str,
+            timeout: float | None,
+            sudo_prompt_token: str | None,
+        ) -> dict[str, object]:
             return self._execute_internal(
                 command,
                 timeout,
-                allow_sudo_prompt=allow_sudo_prompt,
+                allow_sudo_prompt=sudo_prompt_token is not None,
+                sudo_prompt_token=sudo_prompt_token,
             )
 
         return ElevationService(profile, self.target.user, run_elevation).handle(action, payload)
@@ -199,6 +200,7 @@ class WorkerSessionService:
         timeout: float | None = None,
         *,
         allow_sudo_prompt: bool = False,
+        sudo_prompt_token: str | None = None,
     ) -> dict[str, object]:
         session, profile = self._open_session()
         session.state.require(SessionState.READY)
@@ -206,6 +208,7 @@ class WorkerSessionService:
             command,
             timeout=profile.command_timeout_seconds if timeout is None else timeout,
             allow_sudo_prompt=allow_sudo_prompt,
+            sudo_prompt_token=sudo_prompt_token,
         )
         self.cwd = result.cwd
         return {

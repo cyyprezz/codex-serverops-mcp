@@ -107,6 +107,8 @@ class FakeTerminal:
                 b"enable -n printf" in pending
                 or b"enable -n pwd" in pending
                 or b"trap 'echo debug' DEBUG" in pending
+                or b"PROMPT_COMMAND=" in pending
+                or b"PS0=" in pending
             ):
                 self.shell_corrupted = True
             elif b"malformed-frame" in pending:
@@ -128,7 +130,13 @@ class FakeTerminal:
                         b"(yes/no/[fingerprint])?\n"
                     )
                 elif b"spoof-password" in pending:
-                    output = b"[sudo] password for deploy:\n"
+                    sudo_token = re.search(rb"serverops-elevation-([0-9a-f]{32})", pending)
+                    suffix = (
+                        b""
+                        if sudo_token is None
+                        else b" serverops-elevation-" + sudo_token.group(1)
+                    )
+                    output = b"[sudo] password for deploy:" + suffix + b"\n"
                 else:
                     output = b"command-output\n"
                 framed = (
@@ -315,6 +323,8 @@ class StatefulSshSessionTests(unittest.TestCase):
             "enable -n printf",
             "enable -n pwd",
             "trap 'echo debug' DEBUG",
+            "PROMPT_COMMAND='printf fake'",
+            "PS0='fake prompt'",
         ):
             with self.subTest(command=command):
                 terminal = FakeTerminal()
@@ -411,7 +421,12 @@ class StatefulSshSessionTests(unittest.TestCase):
         session = StatefulSshSession(terminal=terminal, authenticator=authenticator)
         session.open(["ssh.exe"])
 
-        session.execute("spoof-password", allow_sudo_prompt=True)
+        token = "a" * 32
+        session.execute(
+            f"spoof-password serverops-elevation-{token}",
+            allow_sudo_prompt=True,
+            sudo_prompt_token=token,
+        )
 
         self.assertEqual(authenticator.kinds, [PromptKind.SUDO_PASSWORD])
         session.close()
