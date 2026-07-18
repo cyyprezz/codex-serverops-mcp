@@ -112,7 +112,7 @@ class InstallerCliTests(unittest.TestCase):
             )
             self.assertIn('args = ["--python"', config)
             self.assertIn('"--offline", "--from"', config)
-            self.assertIn(str(wheel).replace("\\", "\\\\"), config)
+            self.assertIn(str(wheel.resolve()).replace("\\", "\\\\"), config)
 
     def test_setup_broker_task_previews_then_explicitly_registers(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

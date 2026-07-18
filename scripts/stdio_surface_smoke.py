@@ -23,7 +23,7 @@ EXPECTED_TOOLS = {
 }
 
 
-async def smoke(wheel: Path, *, offline: bool) -> None:
+async def smoke(wheel: Path, *, offline: bool, cache_dir: Path | None = None) -> None:
     uvx = shutil.which("uvx")
     if uvx is None:
         raise RuntimeError("uvx is unavailable")
@@ -35,7 +35,8 @@ async def smoke(wheel: Path, *, offline: bool) -> None:
         environment["UV_PYTHON"] = sys.executable
         environment["UV_TOOL_DIR"] = str(Path(directory) / "uv-tools")
         environment["UV_TOOL_BIN_DIR"] = str(Path(directory) / "uv-bin")
-        environment["UV_CACHE_DIR"] = str(wheel.resolve().parents[1] / ".uv-cache")
+        cache_directory = cache_dir or wheel.resolve().parents[1] / ".uv-cache"
+        environment["UV_CACHE_DIR"] = str(cache_directory.resolve())
         parameters = StdioServerParameters(
             command=uvx,
             args=arguments,
@@ -60,8 +61,9 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("wheel", type=Path)
     parser.add_argument("--offline", action="store_true")
+    parser.add_argument("--cache-dir", type=Path)
     args = parser.parse_args()
-    asyncio.run(smoke(args.wheel, offline=args.offline))
+    asyncio.run(smoke(args.wheel, offline=args.offline, cache_dir=args.cache_dir))
 
 
 if __name__ == "__main__":

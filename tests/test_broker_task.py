@@ -166,6 +166,8 @@ class BrokerTaskTests(unittest.TestCase):
             (root / ".uv-cache").mkdir()
             wheel = root / "dist" / "candidate.whl"
             wheel.touch()
+            resolved_root = root.resolve()
+            resolved_wheel = wheel.resolve()
 
             spec = wheel_broker_task_spec(
                 wheel,
@@ -179,10 +181,10 @@ class BrokerTaskTests(unittest.TestCase):
                     "--python",
                     str(Path(sys.executable).resolve()),
                     "--cache-dir",
-                    str(root / ".uv-cache"),
+                    str(resolved_root / ".uv-cache"),
                     "--offline",
                     "--from",
-                    str(wheel),
+                    str(resolved_wheel),
                     "serverops-broker",
                 ),
             )

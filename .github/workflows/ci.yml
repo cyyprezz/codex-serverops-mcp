@@ -50,5 +50,7 @@ jobs:
           $rebuilt = Get-ChildItem -LiteralPath dist/from-sdist -Filter *.whl | Select-Object -First 1
           python scripts/verify_distribution.py $wheel.FullName $rebuilt.FullName
 
-          uvx --offline --from $wheel.FullName serverops-install --version
-          python scripts/stdio_surface_smoke.py $wheel.FullName --offline
+          $smokeCache = Join-Path $env:RUNNER_TEMP "serverops-wheel-cache"
+          python scripts/stdio_surface_smoke.py $wheel.FullName --cache-dir $smokeCache
+          uvx --offline --cache-dir $smokeCache --from $wheel.FullName serverops-install --version
+          python scripts/stdio_surface_smoke.py $wheel.FullName --offline --cache-dir $smokeCache
