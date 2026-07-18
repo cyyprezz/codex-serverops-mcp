@@ -96,16 +96,19 @@ class CommandFrameParserTests(unittest.TestCase):
         self.assertIn("builtin readonly _SERVEROPS_SHELL_NONCE='D4E5F6'", wrapper)
         self.assertNotIn("export _SERVEROPS_SHELL_NONCE", wrapper)
         self.assertIn("builtin export PS1='' PS2='' PS3='' PS4=''", wrapper)
+        self.assertIn(
+            "builtin readonly PROMPT_COMMAND='' PS0='' PS1='' PS2='' PS3='' PS4=''",
+            wrapper,
+        )
         self.assertIn("builtin command -p stty -echo intr '^]'", wrapper)
         self.assertIn("builtin unset PROMPT_COMMAND PS0", wrapper)
 
     def test_shell_health_rejects_prompt_hooks_and_mutated_prompt_state(self) -> None:
         wrapper = command_wrapper("true", "ABC123", shell_nonce=SHELL_NONCE)
 
-        self.assertIn("[[ -z ${PROMPT_COMMAND+x} ]]", wrapper)
-        self.assertIn("[[ -z ${PS0+x} ]]", wrapper)
-        for name in ("PS1", "PS2", "PS3", "PS4"):
+        for name in ("PROMPT_COMMAND", "PS0", "PS1", "PS2", "PS3", "PS4"):
             self.assertIn(f"[[ ${{{name}-}} == '' ]]", wrapper)
+            self.assertIn(f"builtin declare -p {name}", wrapper)
 
     def test_marker_like_user_output_is_not_a_frame(self) -> None:
         parser = CommandFrameParser("ABC", shell_nonce=SHELL_NONCE)

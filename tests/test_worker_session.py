@@ -107,8 +107,6 @@ class FakeTerminal:
                 b"enable -n printf" in pending
                 or b"enable -n pwd" in pending
                 or b"trap 'echo debug' DEBUG" in pending
-                or b"PROMPT_COMMAND=" in pending
-                or b"PS0=" in pending
             ):
                 self.shell_corrupted = True
             elif b"malformed-frame" in pending:
@@ -323,8 +321,6 @@ class StatefulSshSessionTests(unittest.TestCase):
             "enable -n printf",
             "enable -n pwd",
             "trap 'echo debug' DEBUG",
-            "PROMPT_COMMAND='printf fake'",
-            "PS0='fake prompt'",
         ):
             with self.subTest(command=command):
                 terminal = FakeTerminal()
@@ -375,6 +371,9 @@ class StatefulSshSessionTests(unittest.TestCase):
             "stty -echo",
             "stty sane",
             "PATH=/invalid",
+            "PROMPT_COMMAND='printf fake'",
+            "PS0='fake prompt'",
+            "PS1='fake prompt'",
         )
         terminal = FakeTerminal()
         session = StatefulSshSession(terminal=terminal)

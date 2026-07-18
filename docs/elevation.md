@@ -46,9 +46,10 @@ The command limit is 131072 UTF-8 bytes and timeout range is 0.1 through 3600 se
 response identifies `effective_user = root` and `elevated = true`. It intentionally omits `cwd`,
 because a one-shot elevated Bash does not change the held normal shell's directory.
 
-The held shell health record also requires `PROMPT_COMMAND` and `PS0` to remain unset and
-`PS1` through `PS4` to remain empty. Changing those prompt hooks deliberately loses the session
-instead of allowing a later privileged operation to inherit ambiguous prompt behavior.
+The held shell locks `PROMPT_COMMAND` and `PS0` through `PS4` as readonly empty values before any
+user command runs, and verifies them in every health record. Attempts to install those prompt
+hooks therefore fail without running them or allowing a later privileged operation to inherit
+ambiguous prompt behavior.
 
 ## Dedicated root session
 

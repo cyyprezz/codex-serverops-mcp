@@ -44,11 +44,11 @@ DEBUG trap or malformed synchronization causes controlled session loss rather th
 successful result followed by a claimed-ready session. Marker strings correlate PTY records; they
 are not a security boundary or a shell sandbox.
 
-Prompt hooks are part of that health contract: `PROMPT_COMMAND` and `PS0` must remain unset, while
-`PS1` through `PS4` remain empty. A command that changes them completes only as an unknown outcome
-and the session is lost. Guided sudo additionally uses absolute Ubuntu system programs and a fresh
-operation-bound prompt token, so persistent `PATH` or `sudo` function changes cannot receive a
-later protected response.
+Prompt hooks are part of that health contract: `PROMPT_COMMAND` and `PS0` through `PS4` are locked
+as readonly empty values during bootstrap and verified after every command. An attempted change
+fails before a hook can run. Guided sudo additionally uses absolute Ubuntu system programs and a
+fresh operation-bound prompt token, so persistent `PATH` or `sudo` function changes cannot receive
+a later protected response.
 
 ## Raw terminal behavior
 
