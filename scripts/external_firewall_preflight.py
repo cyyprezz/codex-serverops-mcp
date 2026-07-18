@@ -19,6 +19,8 @@ done
 def parse_tool_paths(output: str) -> dict[str, str | None]:
     found: dict[str, str | None] = {}
     for line in output.splitlines():
+        if not line:
+            continue
         name, separator, path = line.partition("=")
         if not separator or name not in TOOLS or name in found:
             raise ValueError("firewall preflight returned an invalid tool row")

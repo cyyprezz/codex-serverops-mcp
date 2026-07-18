@@ -9,10 +9,12 @@ class ExternalFirewallPreflightTests(unittest.TestCase):
     def test_exact_tool_rows_parse_without_claiming_missing_tools(self) -> None:
         self.assertEqual(
             parse_tool_paths(
+                "\n"
                 "ufw=/usr/sbin/ufw\n"
                 "iptables=/usr/sbin/iptables\n"
                 "nft=\n"
                 "systemd-run=/usr/bin/systemd-run\n"
+                "\n\n"
             ),
             {
                 "ufw": "/usr/sbin/ufw",
