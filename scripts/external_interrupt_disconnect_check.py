@@ -41,7 +41,7 @@ def build_firewall_schedule_command(token: str) -> str:
         "test \"$#\" -eq 4; "
         "case \"$1$3\" in ''|*[!0-9.]*) exit 91;; esac; "
         "case \"$2$4\" in ''|*[!0-9]*) exit 92;; esac; "
-        "sudo -n systemd-run --quiet --collect "
+        "sudo -n systemd-run --quiet --no-block --collect "
         f"--unit=serverops-cut-{token} --on-active=5s "
         "--timer-property=AccuracySec=100ms --property=RuntimeMaxSec=25s -- "
         f"/bin/bash -c {shlex.quote(root_script)} serverops-cut "
@@ -73,9 +73,11 @@ def run(profile_name: str) -> dict[str, object]:
         _expect(ufw_line in {"status: active", "status: inactive"}, "UFW status was invalid")
         checks.append(f"ufw_{ufw_line.removeprefix('status: ')}")
 
+        token = secrets.token_hex(6)
+        unit = f"serverops-cut-{token}"
         scheduled = services.server_exec(
             session_id,
-            build_firewall_schedule_command(secrets.token_hex(6)),
+            build_firewall_schedule_command(token),
         )
         _expect(
             scheduled.get("status") == "completed"
@@ -102,7 +104,8 @@ def run(profile_name: str) -> dict[str, object]:
         services.server_connection("close", session_id=session_id)
         session_id = None
         time.sleep(12)
-        checks.append("firewall_cleanup_window_elapsed")
+        _verify_firewall_cleanup(services, profile_name, unit)
+        checks.append("firewall_cleanup_confirmed")
         return {
             "status": "passed",
             "profile": profile_name,
@@ -159,6 +162,36 @@ def ensure_elevation(
     if status.get("active") is True:
         return status
     return services.server_elevation("acquire", session_id)
+
+
+def _verify_firewall_cleanup(
+    services: ApplicationServices,
+    profile_name: str,
+    unit: str,
+) -> None:
+    if not UNIT.fullmatch(unit):
+        raise ValueError("firewall cleanup requires an exact test unit name")
+    session_id: str | None = None
+    try:
+        opened = services.server_connection("open", profile_name=profile_name)
+        session_id = str(opened["session_id"])
+        quoted = shlex.quote(unit)
+        result = services.server_exec(
+            session_id,
+            (
+                f"systemctl list-units {quoted}.service {quoted}.timer "
+                "--all --no-legend --no-pager; "
+                f"systemctl list-timers {quoted}.timer --all --no-legend --no-pager"
+            ),
+        )
+        _expect(
+            result.get("exit_code") == 0 and not str(result.get("output", "")).strip(),
+            "self-reverting firewall unit or timer remained after cleanup",
+        )
+    finally:
+        if session_id is not None:
+            with suppress(Exception):
+                services.server_connection("close", session_id=session_id)
 
 
 def _check_real_interrupt(services: ApplicationServices, session_id: str) -> None:

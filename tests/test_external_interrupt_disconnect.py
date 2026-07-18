@@ -67,6 +67,7 @@ class ExternalInterruptDisconnectTests(unittest.TestCase):
         self.assertIn("iptables -I INPUT", command)
         self.assertIn('-s "$1" --sport "$2" -d "$3" --dport "$4"', command)
         self.assertIn("--on-active=5s", command)
+        self.assertIn("--no-block", command)
         self.assertIn("RuntimeMaxSec=25s", command)
         self.assertIn("trap cleanup EXIT TERM INT", command)
         self.assertLess(command.index("trap cleanup"), command.index("iptables -I"))
