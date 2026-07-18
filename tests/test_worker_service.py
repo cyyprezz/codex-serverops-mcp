@@ -25,11 +25,26 @@ class FakeSession:
         self.open_allows_sudo = False
         self.execute_allows_sudo: list[bool] = []
         self.closed = False
+        self.open_environment: dict[str, str] = {}
+        self.open_sudo_prompt_token: str | None = None
 
-    def open(self, arguments, *, timeout: float, allow_sudo_prompt: bool = False) -> None:
+    def open(
+        self,
+        arguments,
+        *,
+        timeout: float,
+        allow_sudo_prompt: bool = False,
+        sudo_prompt_token: str | None = None,
+        environment=None,
+        failure_check=None,
+    ) -> None:
         del timeout
         self.open_arguments = list(arguments)
         self.open_allows_sudo = allow_sudo_prompt
+        self.open_sudo_prompt_token = sudo_prompt_token
+        self.open_environment = dict(environment or {})
+        if failure_check is not None:
+            failure_check()
         self.state.transition(SessionState.STARTING)
         self.state.transition(SessionState.READY)
 
@@ -57,6 +72,36 @@ class FakeSession:
             self.state.transition(SessionState.CLOSED)
 
 
+class FakeAskpassRelay:
+    def __init__(self) -> None:
+        self.environment = {
+            "SSH_ASKPASS": "serverops-auth.exe",
+            "SSH_ASKPASS_REQUIRE": "force",
+            "SERVEROPS_ASKPASS_TOKEN": "fixture-capability",
+        }
+        self.started = False
+        self.closed = False
+
+    def start(self) -> None:
+        self.started = True
+
+    def check(self) -> None:
+        if not self.started or self.closed:
+            raise RuntimeError("fake Askpass relay is unavailable")
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def relay_factory(relays: list[FakeAskpassRelay]):
+    def create(_profile, _target, _session):
+        relay = FakeAskpassRelay()
+        relays.append(relay)
+        return relay
+
+    return create
+
+
 @unittest.skipUnless(os.name == "nt", "worker service secures Windows local paths")
 class WorkerSessionServiceTests(unittest.TestCase):
     def test_profile_drives_ssh_arguments_auth_context_and_execution(self) -> None:
@@ -79,6 +124,7 @@ class WorkerSessionServiceTests(unittest.TestCase):
             repository.save(ServerOpsConfig(profiles={"prod": profile}))
             sessions: list[FakeSession] = []
             auth_targets: list[object] = []
+            relays: list[FakeAskpassRelay] = []
 
             def session_factory(_profile, auth_target):
                 session = FakeSession()
@@ -95,6 +141,7 @@ class WorkerSessionServiceTests(unittest.TestCase):
                     "192.0.2.20", 22, "deploy"
                 ),
                 session_factory=session_factory,
+                askpass_relay_factory=relay_factory(relays),
                 known_hosts_path=known_hosts,
             )
 
@@ -111,6 +158,8 @@ class WorkerSessionServiceTests(unittest.TestCase):
             self.assertIn(str(known_hosts.resolve()), " ".join(sessions[0].open_arguments))
             self.assertEqual(auth_targets[0].host, "192.0.2.20")
             self.assertEqual(sessions[0].execute_allows_sudo, [False, True])
+            self.assertEqual(sessions[0].open_environment["SSH_ASKPASS_REQUIRE"], "force")
+            self.assertTrue(relays[0].closed)
             self.assertTrue(inspect_path_security(str(known_hosts)).current_user_only)
             service.close()
             self.assertTrue(sessions[0].closed)
@@ -134,6 +183,7 @@ class WorkerSessionServiceTests(unittest.TestCase):
             )
             repository.save(ServerOpsConfig(profiles={"prod": profile}))
             sessions: list[FakeSession] = []
+            relays: list[FakeAskpassRelay] = []
 
             def session_factory(_profile, _auth_target):
                 session = FakeSession()
@@ -148,6 +198,7 @@ class WorkerSessionServiceTests(unittest.TestCase):
                     "192.0.2.20", 22, "deploy"
                 ),
                 session_factory=session_factory,
+                askpass_relay_factory=relay_factory(relays),
                 known_hosts_path=root / "known_hosts",
                 root_session=True,
             )
@@ -158,9 +209,63 @@ class WorkerSessionServiceTests(unittest.TestCase):
             self.assertTrue(opened["root_session"])
             self.assertIn("sudo -n -i", " ".join(sessions[0].open_arguments))
             self.assertFalse(sessions[0].open_allows_sudo)
+            self.assertIsNone(sessions[0].open_sudo_prompt_token)
             with self.assertRaises(RemoteFileError) as captured:
                 service.files("stat", {"path": "/opt/app"}, write=False)
             self.assertEqual(captured.exception.code, "root_session_file_access_disabled")
+            service.close()
+
+    def test_interactive_root_worker_binds_sudo_prompt_to_random_operation_token(self) -> None:
+        from codex_serverops_mcp.worker.service import WorkerSessionService
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repository = TomlProfileRepository(root / "config.toml")
+            profile = ServerProfile(
+                display_name="Production root",
+                connection_type=ConnectionType.DIRECT,
+                authentication=Authentication.OPENSSH,
+                host="192.0.2.20",
+                port=22,
+                user="deploy",
+                elevation_mode=ElevationMode.INTERACTIVE,
+                allow_root_session=True,
+            )
+            repository.save(ServerOpsConfig(profiles={"prod": profile}))
+            sessions: list[FakeSession] = []
+            relays: list[FakeAskpassRelay] = []
+
+            def session_factory(_profile, _auth_target):
+                session = FakeSession()
+                sessions.append(session)
+                return session
+
+            service = WorkerSessionService(
+                "prod",
+                repository=repository,
+                ssh_finder=lambda: Path("C:/Windows/System32/OpenSSH/ssh.exe"),
+                target_resolver=lambda _profile, _ssh: ResolvedSshTarget(
+                    "192.0.2.20", 22, "deploy"
+                ),
+                session_factory=session_factory,
+                askpass_relay_factory=relay_factory(relays),
+                known_hosts_path=root / "known_hosts",
+                root_session=True,
+            )
+
+            service.open()
+
+            token = sessions[0].open_sudo_prompt_token
+            self.assertIsNotNone(token)
+            assert token is not None
+            self.assertRegex(token, r"^[0-9a-f]{32}$")
+            arguments = sessions[0].open_arguments
+            self.assertIn("-p", arguments)
+            self.assertIn(
+                f"[sudo] password for %u: serverops-root-{token}",
+                arguments,
+            )
+            self.assertTrue(sessions[0].open_allows_sudo)
             service.close()
 
 

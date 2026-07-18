@@ -10,7 +10,7 @@ READY_PROMPT = re.compile(r"(?:^|\n)bash-[0-9.]+[$#] ?")
 HOST_KEY_PROMPT = re.compile(r"Are you sure you want to continue connecting.*?\?", re.I)
 HOST_KEY_NOTICE_START = re.compile(r"(?:^|\n)The authenticity of host ", re.I)
 KEY_PASSPHRASE_PROMPT = re.compile(r"Enter passphrase for key .*?:", re.I)
-SUDO_PROMPT = re.compile(r"\[sudo\] password for .*?:", re.I)
+SUDO_PROMPT = re.compile(r"\[sudo\] password for [^\r\n]*?:[^\r\n]*", re.I)
 SUDO_PROMPT_TEXT = "[sudo] password for %u:"
 PASSWORD_PROMPT = re.compile(r"(?:^|\n)[^\n]*password:", re.I)
 

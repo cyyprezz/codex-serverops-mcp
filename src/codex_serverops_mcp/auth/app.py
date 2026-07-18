@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 import time
 import tkinter as tk
 from collections.abc import Callable
@@ -9,6 +10,7 @@ from tkinter import messagebox, ttk
 
 from codex_serverops_mcp.ssh.prompts import PromptKind
 
+from .askpass import is_askpass_invocation, run_askpass
 from .client import DirectAuthClient
 from .launcher import AUTH_TOKEN_ENVIRONMENT
 from .model import AuthPrompt
@@ -171,6 +173,8 @@ def run_auth_app(pipe: str, request_id: str) -> int:
 
 
 def main() -> None:
+    if is_askpass_invocation():
+        raise SystemExit(run_askpass(sys.argv[1:]))
     parser = argparse.ArgumentParser()
     parser.add_argument("--pipe", required=True)
     parser.add_argument("--request-id", required=True)

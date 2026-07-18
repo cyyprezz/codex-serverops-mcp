@@ -3,7 +3,11 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping, Sequence
 
+from codex_serverops_mcp.auth.model import AuthTargetContext
+from codex_serverops_mcp.config import Authentication, ConnectionType, ServerProfile
+from codex_serverops_mcp.ssh.auth_policy import ConnectionPromptPolicy
 from codex_serverops_mcp.ssh.prompts import PromptEvent, PromptKind
+from codex_serverops_mcp.worker.askpass import OpenSshAskpassRelay
 from codex_serverops_mcp.worker.authentication import SecretInputSink
 from codex_serverops_mcp.worker.session import StatefulSshSession
 
@@ -24,6 +28,62 @@ class FixtureAuthenticationCoordinator:
         sink.submit(bytearray(response, encoding="utf-8"))
 
 
+def _target_from_arguments(arguments: Sequence[str]) -> AuthTargetContext:
+    try:
+        port = int(arguments[arguments.index("-p") + 1])
+        user = arguments[arguments.index("-l") + 1]
+        host = arguments[arguments.index("bash") - 1]
+    except (ValueError, IndexError) as error:
+        raise ValueError("product spike requires direct OpenSSH arguments") from error
+    return AuthTargetContext(
+        "local-product-spike",
+        "Local product spike",
+        host,
+        port,
+        user,
+    )
+
+
+def _profile_for_target(
+    target: AuthTargetContext,
+    authentication: Authentication,
+) -> ServerProfile:
+    return ServerProfile(
+        display_name=target.display_name,
+        connection_type=ConnectionType.DIRECT,
+        authentication=authentication,
+        host=target.host,
+        port=target.port,
+        user=target.user,
+    )
+
+
+def _open_with_askpass(
+    session: StatefulSshSession,
+    arguments: Sequence[str],
+    profile: ServerProfile,
+    target: AuthTargetContext,
+    coordinator: FixtureAuthenticationCoordinator,
+) -> None:
+    relay = OpenSshAskpassRelay(
+        target,
+        ConnectionPromptPolicy.from_profile(profile),
+        coordinator,
+        timeout=20,
+    )
+    relay.start()
+    try:
+        session.open(
+            arguments,
+            timeout=20,
+            environment=relay.environment,
+            failure_check=relay.check,
+        )
+        relay.check()
+    finally:
+        relay.close()
+
+
 def probe_product_session_core(
     password_arguments: Sequence[str],
     key_arguments: Sequence[str],
@@ -39,9 +99,20 @@ def probe_product_session_core(
             PromptKind.KEY_PASSPHRASE: key_passphrase,
         }
     )
+    password_target = _target_from_arguments(password_arguments)
+    key_target = _target_from_arguments(key_arguments)
     password_session = StatefulSshSession(authenticator=coordinator)
     try:
-        password_session.open(password_arguments)
+        _open_with_askpass(
+            password_session,
+            password_arguments,
+            _profile_for_target(
+                password_target,
+                Authentication.INTERACTIVE_PASSWORD,
+            ),
+            password_target,
+            coordinator,
+        )
         changed = password_session.execute("cd /opt/app")
         current = password_session.execute("pwd")
         if changed.cwd != "/opt/app" or current.output.strip() != "/opt/app":
@@ -78,7 +149,13 @@ def probe_product_session_core(
 
     key_session = StatefulSshSession(authenticator=coordinator)
     try:
-        key_session.open(key_arguments)
+        _open_with_askpass(
+            key_session,
+            key_arguments,
+            _profile_for_target(key_target, Authentication.OPENSSH),
+            key_target,
+            coordinator,
+        )
         result = key_session.execute("printf 'product-session-ok'")
         if result.exit_code != 0 or "product-session-ok" not in result.output:
             raise AssertionError("product protected-key session failed")

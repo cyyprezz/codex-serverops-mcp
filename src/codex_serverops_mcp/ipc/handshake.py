@@ -10,7 +10,7 @@ from .connection import PipeConnection
 from .errors import IpcAuthenticationError, IpcMessageError
 from .messages import Envelope
 
-IPC_ROLES = {"mcp", "broker", "auth"}
+IPC_ROLES = {"mcp", "broker", "auth", "askpass"}
 NONCE = re.compile(r"^[0-9a-f]{64}$")
 PROOF = re.compile(r"^[0-9a-f]{64}$")
 

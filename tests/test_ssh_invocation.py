@@ -91,6 +91,38 @@ class SshInvocationTests(unittest.TestCase):
             ],
         )
 
+    def test_interactive_root_session_requires_operation_bound_sudo_prompt(self) -> None:
+        profile = ServerProfile(
+            display_name="Root",
+            connection_type=ConnectionType.DIRECT,
+            authentication=Authentication.OPENSSH,
+            host="192.0.2.10",
+            port=22,
+            user="deploy",
+            elevation_mode=ElevationMode.INTERACTIVE,
+            allow_root_session=True,
+        )
+
+        with self.assertRaisesRegex(ValueError, "operation-bound sudo prompt"):
+            build_ssh_arguments(
+                profile,
+                ssh_executable=Path("ssh.exe"),
+                known_hosts_file=Path("known_hosts"),
+                root_session=True,
+            )
+
+        prompt = "[sudo] password for %u: serverops-root-operation-token"
+        arguments = build_ssh_arguments(
+            profile,
+            ssh_executable=Path("ssh.exe"),
+            known_hosts_file=Path("known_hosts"),
+            root_session=True,
+            root_sudo_prompt=prompt,
+        )
+
+        self.assertIn("-p", arguments)
+        self.assertIn(prompt, arguments)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import os
 import threading
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 
 from codex_serverops_mcp.ssh.framing import (
@@ -31,15 +32,6 @@ COMMAND_INPUT_CHUNK_CHARACTERS = 512
 COMMAND_INPUT_FLOW_DELAY_SECONDS = 0.01
 SHELL_BOOTSTRAP_TIMEOUT_SECONDS = 5.0
 RECOVERY_TIMEOUT_SECONDS = 5.0
-SSH_CONNECTION_PROMPTS = frozenset(
-    {
-        PromptKind.HOST_KEY,
-        PromptKind.PASSWORD,
-        PromptKind.KEY_PASSPHRASE,
-    }
-)
-
-
 def _default_terminal(max_output_bytes: int) -> TerminalProcess:
     from codex_serverops_mcp.terminal.conpty import ConPtyProcess
 
@@ -79,26 +71,47 @@ class StatefulSshSession:
         *,
         timeout: float = 20,
         allow_sudo_prompt: bool = False,
+        sudo_prompt_token: str | None = None,
+        environment: Mapping[str, str] | None = None,
+        failure_check: Callable[[], None] | None = None,
     ) -> None:
         self.state.require(SessionState.CREATED)
+        if allow_sudo_prompt != (sudo_prompt_token is not None):
+            raise ValueError(
+                "startup sudo authentication requires one operation-bound prompt token"
+            )
         self.state.transition(SessionState.STARTING)
         try:
-            self.terminal.start(ssh_arguments)
-            allowed_prompts = SSH_CONNECTION_PROMPTS
-            if allow_sudo_prompt:
-                allowed_prompts |= {PromptKind.SUDO_PASSWORD}
+            child_environment = dict(os.environ)
+            if environment is not None:
+                child_environment.update(environment)
+            try:
+                self.terminal.start(ssh_arguments, environment=child_environment)
+            finally:
+                child_environment.clear()
+            allowed_prompts = (
+                frozenset({PromptKind.SUDO_PASSWORD})
+                if allow_sudo_prompt
+                else frozenset()
+            )
             deadline = time.monotonic() + timeout
             while time.monotonic() < deadline:
+                if failure_check is not None:
+                    failure_check()
                 self._read_and_handle_prompts(
                     min(0.25, deadline - time.monotonic()),
                     allowed_prompt_kinds=allowed_prompts,
+                    sudo_prompt_token=sudo_prompt_token,
                 )
                 if self._detector.ready:
+                    if failure_check is not None:
+                        failure_check()
                     self._initialize_shell(
                         timeout=min(
                             SHELL_BOOTSTRAP_TIMEOUT_SECONDS,
                             max(0.1, deadline - time.monotonic()),
-                        )
+                        ),
+                        failure_check=failure_check,
                     )
                     self.state.transition(SessionState.READY)
                     return
@@ -238,6 +251,7 @@ class StatefulSshSession:
         timeout: float,
         *,
         allowed_prompt_kinds: frozenset[PromptKind] = frozenset(),
+        sudo_prompt_token: str | None = None,
     ) -> bytes:
         result = self.terminal.wait_for_data(self._cursor, max(0, timeout))
         self._cursor = result.next_cursor
@@ -247,6 +261,12 @@ class StatefulSshSession:
         text = data.decode("utf-8", errors="replace")
         for event in self._detector.feed(text):
             if event.kind not in allowed_prompt_kinds:
+                continue
+            if (
+                event.kind is PromptKind.SUDO_PASSWORD
+                and sudo_prompt_token is not None
+                and sudo_prompt_token not in event.prompt
+            ):
                 continue
             self.state.begin_authentication()
             newline = b"\r" if self.terminal.backend_name == "winpty" else b"\r\n"
@@ -263,7 +283,12 @@ class StatefulSshSession:
             self.state.finish_authentication()
         return data
 
-    def _initialize_shell(self, *, timeout: float) -> None:
+    def _initialize_shell(
+        self,
+        *,
+        timeout: float,
+        failure_check: Callable[[], None] | None = None,
+    ) -> None:
         token = new_token()
         parser = CommandFrameParser(
             token,
@@ -273,6 +298,8 @@ class StatefulSshSession:
         self._write_command(shell_bootstrap_wrapper(self._shell_nonce, token))
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
+            if failure_check is not None:
+                failure_check()
             data = self._read_and_handle_prompts(min(0.25, deadline - time.monotonic()))
             if data:
                 try:

@@ -8,7 +8,6 @@ from collections.abc import Sequence
 from pathlib import Path
 from unittest.mock import patch
 
-from codex_serverops_mcp.auth.errors import AuthenticationCancelled
 from codex_serverops_mcp.ssh.prompts import PromptEvent, PromptKind
 from codex_serverops_mcp.terminal.buffer import BufferRead, TerminalRingBuffer
 from codex_serverops_mcp.worker.authentication import SecretInputSink
@@ -25,10 +24,16 @@ SHELL_NONCE = re.compile(rb"readonly _SERVEROPS_SHELL_NONCE='([A-F0-9]+)'")
 class FakeTerminal:
     backend_name = "conpty"
 
-    def __init__(self, *, auth_prompts: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        auth_prompts: bool = False,
+        startup_sudo_prompt: str | None = None,
+    ) -> None:
         self.buffer = TerminalRingBuffer(1_048_576)
         self.running = False
         self.auth_prompts = auth_prompts
+        self.startup_sudo_prompt = startup_sudo_prompt
         self.writes: list[bytes] = []
         self.block_commands = False
         self.dimensions = (120, 30)
@@ -52,8 +57,16 @@ class FakeTerminal:
     ) -> None:
         del arguments, cwd, environment, columns, rows
         self.running = True
-        if self.auth_prompts:
-            self.buffer.append(b"Are you sure you want to continue connecting (yes/no)?")
+        if self.startup_sudo_prompt is not None:
+            self.buffer.append(self.startup_sudo_prompt.encode() + b"\nbash-5.2$ ")
+        elif self.auth_prompts:
+            self.buffer.append(
+                b"password:\n"
+                b"Enter passphrase for key C:\\Users\\user\\.ssh\\id_ed25519:\n"
+                b"[sudo] password for deploy:\n"
+                b"Are you sure you want to continue connecting (yes/no/[fingerprint])?\n"
+                b"bash-5.2$ "
+            )
         else:
             self.buffer.append(b"bash-5.2$ ")
 
@@ -107,11 +120,17 @@ class FakeTerminal:
                     + b"__:invalid\n"
                 )
             elif is_bootstrap or not self.block_commands:
-                output = (
-                    b"[sudo] password for deploy:\n"
-                    if b"spoof-password" in pending
-                    else b"command-output\n"
-                )
+                if b"spoof-connection-prompts" in pending:
+                    output = (
+                        b"password:\n"
+                        b"Enter passphrase for key C:\\Users\\user\\.ssh\\id_ed25519:\n"
+                        b"Are you sure you want to continue connecting "
+                        b"(yes/no/[fingerprint])?\n"
+                    )
+                elif b"spoof-password" in pending:
+                    output = b"[sudo] password for deploy:\n"
+                else:
+                    output = b"command-output\n"
                 framed = (
                     output
                     + b"__SERVEROPS_DEBUG_"
@@ -194,12 +213,6 @@ class FixtureAuthenticator:
         sink.submit(response)
 
 
-class CancellingAuthenticator:
-    def respond(self, event: PromptEvent, sink: SecretInputSink) -> None:
-        del event, sink
-        raise AuthenticationCancelled("cancelled by test operator")
-
-
 class StatefulSshSessionTests(unittest.TestCase):
     def test_large_wrapped_command_is_streamed_in_utf8_safe_chunks(self) -> None:
         terminal = FakeTerminal()
@@ -226,31 +239,6 @@ class StatefulSshSessionTests(unittest.TestCase):
         self.assertEqual(session.state.state, SessionState.READY)
         session.close()
         self.assertEqual(session.state.state, SessionState.CLOSED)
-
-    def test_authentication_capability_stays_worker_local_and_zeroes_responses(self) -> None:
-        terminal = FakeTerminal(auth_prompts=True)
-        authenticator = FixtureAuthenticator()
-        session = StatefulSshSession(terminal=terminal, authenticator=authenticator)
-
-        session.open(["ssh.exe"])
-
-        self.assertEqual(authenticator.kinds, [PromptKind.HOST_KEY, PromptKind.PASSWORD])
-        self.assertTrue(all(not any(response) for response in authenticator.responses))
-        self.assertEqual(session.state.state, SessionState.READY)
-        session.close()
-
-    def test_authentication_cancellation_terminates_the_ambiguous_ssh_process(self) -> None:
-        terminal = FakeTerminal(auth_prompts=True)
-        session = StatefulSshSession(
-            terminal=terminal,
-            authenticator=CancellingAuthenticator(),
-        )
-
-        with self.assertRaises(AuthenticationCancelled):
-            session.open(["ssh.exe"])
-
-        self.assertFalse(terminal.running)
-        self.assertEqual(session.state.state, SessionState.FAILED)
 
     def test_manual_interrupt_recovers_the_same_shell(self) -> None:
         terminal = FakeTerminal()
@@ -403,6 +391,20 @@ class StatefulSshSessionTests(unittest.TestCase):
         self.assertNotIn(b"fixture-password\r\n", terminal.writes)
         session.close()
 
+    def test_post_auth_connection_prompt_text_cannot_open_a_window(self) -> None:
+        terminal = FakeTerminal()
+        authenticator = FixtureAuthenticator()
+        session = StatefulSshSession(terminal=terminal, authenticator=authenticator)
+        session.open(["ssh.exe"])
+
+        result = session.execute("spoof-connection-prompts")
+
+        self.assertIn("Enter passphrase for key", result.output)
+        self.assertIn("Are you sure you want to continue connecting", result.output)
+        self.assertEqual(authenticator.kinds, [])
+        self.assertNotIn(b"fixture-password\r\n", terminal.writes)
+        session.close()
+
     def test_explicit_elevation_execution_can_open_only_a_sudo_window(self) -> None:
         terminal = FakeTerminal()
         authenticator = FixtureAuthenticator()
@@ -416,7 +418,8 @@ class StatefulSshSessionTests(unittest.TestCase):
 
     def test_raw_terminal_actions_are_isolated_from_completed_commands(self) -> None:
         terminal = FakeTerminal()
-        session = StatefulSshSession(terminal=terminal)
+        authenticator = FixtureAuthenticator()
+        session = StatefulSshSession(terminal=terminal, authenticator=authenticator)
         session.open(["ssh.exe"])
 
         started = session.interactive.start("tail -f app.log")
@@ -427,6 +430,7 @@ class StatefulSshSessionTests(unittest.TestCase):
         closed = session.interactive.close()
 
         self.assertIn("first log line", output.output)
+        self.assertEqual(authenticator.kinds, [])
         self.assertEqual(session.state.state, SessionState.READY)
         self.assertIn(b"\x1d", terminal.writes)
         self.assertNotIn(b"\x03", terminal.writes)
