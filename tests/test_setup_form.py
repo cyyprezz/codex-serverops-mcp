@@ -35,7 +35,7 @@ class SetupFormTests(unittest.TestCase):
         ):
             return ProfileFormState(
                 object(),  # type: ignore[arg-type]
-                profile_name="hetzner-test",
+                profile_name="fixture-test",
                 profile=None,
                 suggested_host="192.0.2.1",
                 suggested_user="deploy",
