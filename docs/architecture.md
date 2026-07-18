@@ -21,7 +21,7 @@ Codex
 The MCP process owns no OpenSSH process. The broker owns session metadata but never receives
 passwords or passphrases. A worker owns one OpenSSH process for its complete lifetime.
 
-The secured broker/worker lifecycle, MCP reconnection path, direct visible-auth coordinator,
+The secured broker/worker lifecycle, MCP session-rediscovery path, direct visible-auth coordinator,
 profile-driven product SSH session, separate setup process, structured-file service and guided
 elevation service are implemented. Local audit, installer and Doctor are also implemented. The
 current FastMCP surface exposes the complete eight-tool product contract. Distribution and manual
@@ -33,7 +33,7 @@ release gates remain before the package is labelled `0.1.0`.
 tools/       FastMCP schemas and thin adapters only
 application Application-level composition and use cases
 config/      Profile model, TOML codec, locking and atomic repository
-broker/      Session registry, worker lifecycle and reconnect behavior
+broker/      Session registry, worker lifecycle and rediscovery behavior
 worker/      Session state machine and exactly one SSH/terminal owner
 ipc/         Versioned envelopes, size limits and secured Windows pipes
 auth/        One-use auth protocol, launcher and visible local program
@@ -50,7 +50,7 @@ The dependency direction is inward toward smaller primitives:
 
 ```text
 tools -> application -> config / broker / files / elevation / security
-setup -> config + broker client + terminal primitive
+setup -> config + broker client + terminal primitive + profile audit
 broker -> ipc + worker protocol contracts
 worker -> ipc + auth + ssh + terminal + files + elevation
 auth -> ipc protocol primitives
@@ -92,10 +92,17 @@ they can be tested without starting processes.
 - Commands start only from `READY`.
 - A timed-out command stays active until interrupted, completed or lost; it is not silently
   marked ready.
-- Loss after command submission and before the end frame is `outcome_unknown` and is never
-  retried automatically.
+- A completed-command result is accepted only after the strict result, working-directory and
+  shell-health frame is valid and the original Bash process is still live.
+- Loss after command submission and before verified completion and shell health is
+  `outcome_unknown` and is never retried automatically.
+- `exit`, `logout`, shell replacement through `exec`, disabled required builtins, hostile DEBUG
+  traps or any other unverifiable shell synchronization deliberately move the session to `LOST`.
+  Arbitrary shell state cannot be made unbreakable.
 - A root shell is a separate worker/session and cannot replace an existing normal session.
-- MCP reconnect discovers broker-owned metadata; it does not adopt an unowned SSH process.
+- MCP action `rediscover` finds broker-owned metadata and the unchanged worker. It neither adopts
+  an unowned SSH process nor repairs a lost connection, creates a replacement session or retries a
+  command.
 
 ## Secret boundary
 
@@ -110,7 +117,7 @@ auth path even though they are not credentials.
 
 - Pure unit tests: config, protocol envelopes, state machine, framing, buffers, path policy,
   redaction and audit schema.
-- Process tests: broker lifecycle, worker ownership, reconnect and IPC failures.
+- Process tests: broker lifecycle, worker ownership, session rediscovery and IPC failures.
 - Optional local Docker integration: OpenSSH, Bash state, disconnects, sudo and remote files;
   public CI does not provision this environment.
 - Manual Windows release check: visible setup/auth windows and user-driven confirmations.

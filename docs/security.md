@@ -19,6 +19,9 @@ suitable file permissions or server-side sudoers rules.
 - Credential-like remote text is not trusted as an authentication request. SSH prompts are
   accepted only during connection startup and sudo prompts only during explicit elevation.
 - Command framing correlates PTY output; it is not a security boundary or a shell sandbox.
+- Automatic public-key installation never removes a remote `authorized_keys` entry during
+  rollback. A lost result may mean that the key was already written, so ServerOps reports the
+  uncertainty and local rollback status instead of guessing or attempting a destructive cleanup.
 - Redaction recognizes limited known patterns and cannot guarantee detection of every secret.
 
 ## Audit log
@@ -30,10 +33,10 @@ Operational MCP requests are recorded at:
 ```
 
 The directory and daily file receive a protected current-user Windows DACL. A process lock and a
-flushed append keep complete JSON lines when multiple MCP processes write. Each schema-version-1
-event records time, profile, session, SSH/effective user, tool, action, result status, exit code,
-duration, truncation and elevation state. A failed write does not falsify the remote result: the
-tool response reports `audit.logged = false`.
+flushed append keep complete JSON lines when multiple processes write. Schema-version-1 remote
+operation events record the applicable time, profile, session, SSH/effective user, tool, action,
+result status, exit code, duration, truncation and elevation state. A failed write does not falsify
+the remote result: the tool response reports `audit.logged = false`.
 
 For `server_exec`, elevation `exec` and raw-terminal `start`, the log contains only a UTF-8-bounded
 redacted preview, SHA-256 of the original command, and flags indicating redaction or truncation.
@@ -44,6 +47,32 @@ The logger never includes PTY output, read file content, write content, patches,
 passphrases, private keys or direct authentication input. Known redaction covers Bearer tokens,
 labelled password/secret/API-key values, URL user information, common GitHub/cloud/API key shapes
 and private-key blocks before preview truncation.
+
+Local profile and setup operations use the same protected log with a separate narrow event shape.
+The actions are:
+
+```text
+profile_created
+profile_updated
+profile_removed
+profile_test_started
+profile_test_completed
+profile_test_failed
+key_generation_started
+key_generation_completed
+key_generation_failed
+public_key_install_started
+public_key_install_completed
+public_key_install_failed
+public_key_install_outcome_unknown
+```
+
+These events allow only the profile name, result status and, when a profile is available, its
+connection type, authentication mode, environment label, terminal/file capability flags,
+elevation mode and root-session flag. They omit the full host or IP address, full key path, public
+key line, configuration content and all credentials. Removal uses only the bounded non-secret
+profile summary available before deletion. If this local audit write fails, the profile operation
+keeps its real outcome and returns `audit.logged = false`.
 
 ## Operational guidance
 

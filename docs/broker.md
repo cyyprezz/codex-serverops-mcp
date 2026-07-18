@@ -44,10 +44,12 @@ not an SSH credential, and remains inside the SID-restricted runtime directory.
 - After acquiring the unique broker pipe, a replacement broker removes only status records whose
   PIDs are certainly dead. Live or unreadable records are preserved and are never adopted.
 
-The product path accepts session open, list, status, reconnect, exec, terminal and close
-operations. `session.create` remains an internal lifecycle-test operation. Requests and
-responses use exact-field, bounded IPC envelopes with correlation IDs. Unknown operations and
-invalid payloads return controlled error envelopes.
+The public product path accepts session open, list, status, `rediscover`, exec, terminal and close
+operations. Rediscovery returns the existing broker record and unchanged worker; it never repairs
+a lost SSH connection, creates a replacement worker or retries a command. `session.create`
+remains an internal lifecycle-test operation. Requests and responses use exact-field, bounded IPC
+envelopes with correlation IDs. Unknown operations and invalid payloads return controlled error
+envelopes.
 
 ## Current implementation boundary
 

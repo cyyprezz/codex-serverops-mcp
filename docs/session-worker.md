@@ -20,15 +20,27 @@ does not import spike orchestration.
 
 ## Completed command behavior
 
-Commands start only from `READY`. A random frame returns combined PTY output, exit code and
-remote working directory. Output is bounded; if the configured limit is exceeded, the newest
-portion is returned with `truncated = true`.
+Commands start only from `READY`. A random, strict line-delimited frame returns combined PTY
+output, exit code and remote working directory, followed by a health record for the original Bash
+shell. Technical records use explicit Bash builtins and do not depend on aliases or `PATH`.
+Output is bounded; if the configured limit is exceeded, the newest portion is returned with
+`truncated = true`.
 
-Only one command may be active. A connection loss before the end frame is `outcome_unknown`
-and is never retried. A timeout sends the proven remote `VINTR` byte and a recovery frame. The
-session becomes `READY` only if that frame is observed; otherwise it becomes `LOST`.
+Only one command may be active. Completion requires the complete begin/debug/end/cwd/health
+sequence, the original non-exported readonly shell identity, enabled required builtins and a live
+terminal process. A connection or shell loss before that verification is `outcome_unknown` and is
+never retried. A timeout sends the proven remote `VINTR` byte and a recovery frame. The session
+becomes `READY` only after the same shell-health and liveness checks pass; otherwise it becomes
+`LOST`.
 Timed-out commands may already have produced side effects before interruption and are never safe
 to retry merely because their completion frame was not returned.
+
+Commands may intentionally change ordinary Bash state, including the working directory,
+variables, virtual environments and shell options. State that destroys or replaces the original
+shell cannot be made safe: `exit`, `logout`, `exec`, a disabled required builtin, an interfering
+DEBUG trap or malformed synchronization causes controlled session loss rather than a false
+successful result followed by a claimed-ready session. Marker strings correlate PTY records; they
+are not a security boundary or a shell sandbox.
 
 ## Raw terminal behavior
 
@@ -38,8 +50,9 @@ and close. Reads may return as soon as any new terminal chunk arrives, so caller
 `dropped_before_cursor`.
 
 Closing raw mode sends the proven interrupt and then a framed no-op. The state returns to
-`READY` only after Bash executes that synchronization frame. Failure to prove control returned
-is a controlled session failure.
+`READY` only after the strict frame, original-shell health and terminal-liveness checks pass.
+Failure to prove that control returned moves the session to `LOST`; the interactive outcome is
+reported as unknown rather than retried.
 
 ## Authentication boundary
 
@@ -54,12 +67,14 @@ coordinator.
 ## Current verification
 
 Unit tests cover every state transition, adversarial prompt spoofing, prompt classification,
-bounded framing, timeout, manual interrupt, raw cursor reads and secret-buffer clearing. Local
+bounded framing, timeout, manual interrupt, raw cursor reads, shell replacement/termination,
+disabled builtins, changed shell options, hostile DEBUG traps, invalid recovery and
+secret-buffer clearing. Local
 Docker/OpenSSH development scripts can additionally exercise the product core against Windows
 ConPTY with all four prompt kinds, persistent working directory, sudo, protected-key login and a
 live raw `cat` session; public CI does not run that environment.
 
 The optional full product smoke traverses application, auto-started broker, dedicated worker
 process and Docker SSH. It verifies profile opening, persistent working directory, persistent
-virtual environment, exit code, cursor-based raw terminal and MCP-style reconnect without command
-retry.
+virtual environment, exit code, cursor-based raw terminal and MCP session rediscovery without
+command retry.

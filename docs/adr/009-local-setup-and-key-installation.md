@@ -20,6 +20,18 @@ an ordinary password-authenticated worker session, avoid duplicates, then test a
 Use configuration snapshot hashes to restore local state after failure without overwriting a
 concurrent edit.
 
+## Current-product amendment
+
+Public-key installation now compares key algorithm and blob, ignoring the optional comment, and
+returns one correlated `key_added` or `key_already_present` result. Successful setup exposes
+`public_key_installed = true` and the matching `public_key_was_new` boolean. Missing or ambiguous
+confirmation is `outcome_unknown`; it never claims that the remote write did not happen.
+
+Local rollback remains snapshot-hash guarded and reports `rolled_back`,
+`skipped_concurrent_change` or `failed`. The setup process never removes a remote key
+automatically after an ambiguous install or later local/login failure. It instead warns that the
+key may remain in `authorized_keys` and requires the operator to inspect the remote account.
+
 ## Evidence
 
 Pure and Windows tests cover the request contract, secret-field rejection, launcher arguments,

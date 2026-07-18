@@ -26,6 +26,13 @@ Keep command framing, file wire framing, patch application and response mapping 
 modules. Stream large terminal input in UTF-8-safe bounded chunks and keep Bash continuation
 prompts empty so multi-line helpers cannot contaminate protocol output.
 
+## Current-product amendment
+
+The current public session action is `rediscover`, not an SSH reconnect. It can locate only an
+existing broker-owned worker and cannot repair a lost connection or establish the result of an
+ambiguous file mutation. After `file_outcome_unknown`, the operator must inspect the remote path or
+hash through a new session or independent SSH connection before choosing a follow-up action.
+
 ## Evidence
 
 The portable helper passes in the disposable BusyBox-based Linux fixture. The Windows product

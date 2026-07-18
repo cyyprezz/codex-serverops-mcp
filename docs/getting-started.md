@@ -20,9 +20,11 @@ name, host and Linux user. The local four-step assistant then owns the actual co
 - **OpenSSH defaults** uses the user's normal SSH configuration and agent behavior.
 - **Existing key** needs the private key path, for example `%USERPROFILE%\.ssh\id_ed25519`.
   Do not select the `.pub` file.
-- Select **Install public key on the server** only when that public key is not already authorized.
-  The transition logs in once with the account password, installs only the public line and proves
-  a fresh key login before retaining the key profile.
+- **Install public key on the server** is idempotent. The transition logs in once with the account
+  password, compares the key algorithm and blob without relying on its comment, and either reports
+  that the key was already present or appends only the selected public line. It then proves a fresh
+  key login before retaining the key profile. The result reports `public_key_was_new = false` for
+  an existing key and `true` for a newly appended key.
 - **New key** creates a dedicated Ed25519 key locally. Its optional passphrase stays in the setup
   process and its directly owned `ssh-keygen` terminal.
 
@@ -50,6 +52,11 @@ List the configured allowed root with the structured file tool.
 Close the ServerOps session.
 ```
 
+If the disposable MCP process restarts while the broker and worker remain healthy, list the held
+sessions and use `server_connection(action="rediscover")` with the existing session ID. This
+rediscovers that unchanged worker and returns `command_retried = false`; it does not repair a lost
+SSH connection or create a replacement session.
+
 If sudo is enabled, acquire it once, run the required elevated operations, then release it. Do not
 acquire and release around every individual command; ServerOps reuses the server-side sudo cache.
 
@@ -57,6 +64,9 @@ acquire and release around every individual command; ServerOps reuses the server
 
 - Begin with a disposable or non-production account and directory.
 - Back up `authorized_keys` before testing automatic public-key installation.
+- If installation or the following fresh login fails, read the local rollback status carefully.
+  The public key may already be present remotely, and ServerOps never removes it automatically.
+  Review the remote account before retrying or removing the key.
 - Verify the server directly with `ssh` when host-key, firewall or account access is uncertain.
 - Keep production approval and backups outside ServerOps; local confirmation is not a remote
   authorization boundary.

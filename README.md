@@ -26,6 +26,10 @@ It provides Codex with persistent, broker-owned SSH sessions that keep their Bas
 multiple MCP calls. Codex can enter a project directory, activate a virtual environment, run
 commands, inspect output and continue working in the same remote shell.
 
+Persistence does not make the shell indestructible. If a command exits or replaces the original
+Bash, or leaves it impossible to verify, ServerOps loses the session in a controlled way and never
+retries an uncertain command automatically.
+
 Sensitive interaction remains local. SSH passwords, private-key passphrases, host-key decisions
 and interactive sudo authentication are handled in separate visible windows and are never sent
 through MCP tool arguments.
@@ -41,18 +45,20 @@ In practice, this enables workflows such as:
 - controlling long-running or interactive terminal processes;
 - using password, key and guided sudo authentication without exposing credentials to Codex;
 - reading and safely patching configured remote project files; and
-- reconnecting Codex to broker-owned sessions after the disposable MCP process restarts.
+- rediscovering broker-owned sessions after the disposable MCP process restarts, without
+  rebuilding SSH or retrying a command.
 
 > **Development status:** the current package is `0.0.0.dev1`, not the stable `0.1.0` release.
-> Its local automated suite and manually operated development environments have passed, but the
-> public CI does not reproduce a real SSH/sudo server. Use only disposable or non-production
+> Historical external-server evidence exists, but the final candidate gates are not complete and
+> the public CI does not reproduce a real SSH/sudo server. Use only disposable or non-production
 > accounts while release hardening is in progress.
 
 ## What it provides
 
 - direct SSH targets and existing OpenSSH aliases;
 - a guided local profile assistant with password, existing-key and new-key workflows;
-- stateful SSH sessions that preserve working directory and shell environment;
+- stateful SSH sessions that preserve working directory and shell environment while the original
+  Bash remains healthy and controllable;
 - completed commands plus interactive terminal control;
 - structured UTF-8 reads and hash-protected normal-user file edits below configured roots;
 - explicit sudo acquisition, reuse and release plus optional separate root sessions;
@@ -98,6 +104,7 @@ profile, open a session and verify the connection without putting a credential i
 - [Security model and audit](docs/security.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [Architecture](docs/architecture.md)
+- [Release evidence and final-candidate procedure](docs/release-evidence.md)
 
 ## Development
 
