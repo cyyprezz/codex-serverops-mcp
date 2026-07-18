@@ -50,10 +50,10 @@ In practice, this enables workflows such as:
 - rediscovering broker-owned sessions after the disposable MCP process restarts, without
   rebuilding SSH or retrying a command.
 
-> **Release candidate status:** the source package is the untagged `0.1.0` candidate, not a
-> published release. Historical external-server evidence exists, but the final candidate gates
-> are not complete and public CI does not reproduce a real SSH/sudo server. Use only disposable
-> or non-production accounts until the release evidence, merge and tag are complete.
+> **Release status:** version `0.1.0` is the first public release. Its automated, packaging and
+> contained integration gates are release-blocking. Real-network and visible credential checks
+> remain documented operator evidence because public CI cannot reproduce a real SSH/sudo server.
+> Start with disposable or non-production accounts while evaluating this initial release.
 
 ## What it provides
 

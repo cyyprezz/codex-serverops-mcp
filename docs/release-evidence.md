@@ -5,9 +5,9 @@ checks that public CI cannot reproduce. Reports must omit addresses, domains, ac
 credentials, key material, customer identifiers and real production paths.
 
 The table below records the historical development run from 2026-07-18. It is useful regression
-context, but it is **not** final `0.1.0` evidence: the tested source history predates the public
-repository and is not an ancestor of the current release candidate. Every `not tested` row and
-every missing version must be resolved on the final candidate.
+context, but it is not exhaustive evidence for the exact `0.1.0` commit. The public `0.1.0`
+workflow deliberately blocks on automated, packaging and contained integration gates; this
+manual matrix remains an advisory operator record for checks that public CI cannot reproduce.
 
 ## Historical environment
 
