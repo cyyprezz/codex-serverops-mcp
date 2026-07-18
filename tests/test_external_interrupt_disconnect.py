@@ -5,6 +5,7 @@ import unittest
 from codex_serverops_mcp.broker.errors import BrokerRemoteError
 from scripts.external_interrupt_disconnect_check import (
     NETWORK_COMMAND,
+    SCHEDULER_COMMAND_TIMEOUT_SECONDS,
     _output_matches_marker,
     _trigger_connection_reset,
     build_firewall_schedule_command,
@@ -55,14 +56,23 @@ class ExternalInterruptDisconnectTests(unittest.TestCase):
             _trigger_connection_reset(scheduler, "session-1", "schedule"),  # type: ignore[arg-type]
             "scheduler_command",
         )
-        self.assertEqual(scheduler.calls, [("schedule", None)])
+        self.assertEqual(
+            scheduler.calls,
+            [("schedule", SCHEDULER_COMMAND_TIMEOUT_SECONDS)],
+        )
 
         probe = Services(2)
         self.assertEqual(
             _trigger_connection_reset(probe, "session-1", "schedule"),  # type: ignore[arg-type]
             "network_probe",
         )
-        self.assertEqual(probe.calls, [("schedule", None), (NETWORK_COMMAND, 30)])
+        self.assertEqual(
+            probe.calls,
+            [
+                ("schedule", SCHEDULER_COMMAND_TIMEOUT_SECONDS),
+                (NETWORK_COMMAND, 30),
+            ],
+        )
 
     def test_interrupt_recovery_marker_allows_only_surrounding_whitespace(self) -> None:
         self.assertTrue(

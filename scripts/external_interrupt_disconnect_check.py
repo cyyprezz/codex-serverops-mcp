@@ -16,6 +16,7 @@ TOKEN = re.compile(r"^[a-f0-9]{12}$")
 UNIT = re.compile(r"^serverops-cut-[a-f0-9]{12}$")
 INTERRUPT_MARKER = "serverops-interrupt-started"
 AFTER_INTERRUPT_MARKER = "serverops-after-interrupt"
+SCHEDULER_COMMAND_TIMEOUT_SECONDS = 15
 NETWORK_COMMAND = (
     "i=0; while [ \"$i\" -lt 60 ]; do "
     "printf 'serverops-network-probe-%s\\n' \"$i\"; "
@@ -158,7 +159,11 @@ def _trigger_connection_reset(
     schedule_command: str,
 ) -> str:
     try:
-        scheduled = services.server_exec(session_id, schedule_command)
+        scheduled = services.server_exec(
+            session_id,
+            schedule_command,
+            timeout=SCHEDULER_COMMAND_TIMEOUT_SECONDS,
+        )
     except BrokerRemoteError as error:
         _expect(error.code == "outcome_unknown", "disconnect returned the wrong error code")
         return "scheduler_command"
