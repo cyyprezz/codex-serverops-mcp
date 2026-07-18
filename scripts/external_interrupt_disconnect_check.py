@@ -180,9 +180,13 @@ def _check_real_interrupt(services: ApplicationServices, session_id: str) -> Non
     _expect(closed.get("state") == "ready", "Ctrl+C did not restore the ready shell")
     after = services.server_exec(session_id, f"printf '{AFTER_INTERRUPT_MARKER}'")
     _expect(
-        after.get("exit_code") == 0 and after.get("output") == AFTER_INTERRUPT_MARKER,
+        _output_matches_marker(after, AFTER_INTERRUPT_MARKER),
         "same shell did not execute after Ctrl+C",
     )
+
+
+def _output_matches_marker(result: dict[str, object], marker: str) -> bool:
+    return result.get("exit_code") == 0 and str(result.get("output", "")).strip() == marker
 
 
 def _shutdown_idle_broker() -> None:

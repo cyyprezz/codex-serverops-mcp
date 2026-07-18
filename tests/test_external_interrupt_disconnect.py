@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from scripts.external_interrupt_disconnect_check import (
+    _output_matches_marker,
     build_firewall_schedule_command,
     diagnose_unit,
     ensure_elevation,
@@ -29,6 +30,20 @@ class FakeElevationServices:
 
 
 class ExternalInterruptDisconnectTests(unittest.TestCase):
+    def test_interrupt_recovery_marker_allows_only_surrounding_whitespace(self) -> None:
+        self.assertTrue(
+            _output_matches_marker(
+                {"exit_code": 0, "output": "\r\nserverops-after-interrupt\n\n"},
+                "serverops-after-interrupt",
+            )
+        )
+        self.assertFalse(
+            _output_matches_marker(
+                {"exit_code": 0, "output": "serverops-after-interrupt\nunexpected"},
+                "serverops-after-interrupt",
+            )
+        )
+
     def test_elevation_reuses_an_active_sudo_timestamp(self) -> None:
         services = FakeElevationServices(active=True)
 
