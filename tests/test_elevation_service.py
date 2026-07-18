@@ -10,7 +10,10 @@ from codex_serverops_mcp.config import (
     ServerProfile,
 )
 from codex_serverops_mcp.elevation.errors import ElevationError
-from codex_serverops_mcp.elevation.service import ElevationService
+from codex_serverops_mcp.elevation.service import (
+    INTERACTIVE_ACQUIRE_TIMEOUT_SECONDS,
+    ElevationService,
+)
 from codex_serverops_mcp.elevation.shell import build_elevated_shell_command
 from codex_serverops_mcp.worker.errors import CommandTimedOut
 
@@ -159,7 +162,7 @@ class ElevationServiceTests(unittest.TestCase):
         service = ElevationService(profile(ElevationMode.INTERACTIVE), "deploy", runner)
 
         service.handle("acquire", {})
-        acquire_command, _timeout, acquire_token = runner.calls[-1]
+        acquire_command, acquire_timeout, acquire_token = runner.calls[-1]
         service.handle("exec", {"command": "id -u"})
         exec_command, _timeout, exec_token = runner.calls[-1]
 
@@ -172,6 +175,7 @@ class ElevationServiceTests(unittest.TestCase):
             self.assertIn("/usr/bin/sudo", command)
             self.assertNotRegex(command, r"(?:^|[ |])sudo(?:[ |])")
         self.assertNotEqual(acquire_token, exec_token)
+        self.assertEqual(acquire_timeout, INTERACTIVE_ACQUIRE_TIMEOUT_SECONDS)
 
     def test_interactive_builder_rejects_a_missing_prompt_token(self) -> None:
         with self.assertRaisesRegex(ValueError, "operation-bound prompt token"):

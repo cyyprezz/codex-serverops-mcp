@@ -13,6 +13,7 @@ from .errors import ElevationError
 from .shell import ElevatedShellCommand, build_elevated_shell_command
 
 MAX_ELEVATED_COMMAND_BYTES = 131_072
+INTERACTIVE_ACQUIRE_TIMEOUT_SECONDS = 5.0
 CommandRunner = Callable[[str, float | None, str | None], dict[str, object]]
 
 
@@ -54,8 +55,11 @@ class ElevationService:
         command = "/usr/bin/sudo -n -v"
         if token is not None:
             command = f"/usr/bin/sudo -p '{operation_sudo_prompt('elevation', token)}' -v"
+        timeout = self.profile.command_timeout_seconds
+        if token is not None:
+            timeout = min(timeout, INTERACTIVE_ACQUIRE_TIMEOUT_SECONDS)
         try:
-            result = self._run(command, self.profile.command_timeout_seconds, token)
+            result = self._run(command, timeout, token)
         except ServerOpsError as error:
             if error.code != "command_timed_out" or not self._cache_is_active():
                 raise

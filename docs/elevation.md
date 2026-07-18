@@ -32,6 +32,9 @@ opens another authentication window.
 If an `acquire` command reaches its timeout after verified shell recovery, ServerOps performs one
 non-prompting `sudo -n -v` reconciliation. It reports success only when that probe confirms the
 requested active cache; an inactive or unverifiable cache preserves the original timeout failure.
+The local password-window duration remains excluded from command timing. After submission, the
+interactive `sudo -v` completion is bounded to five seconds before that safe reconciliation, so a
+missing PTY completion frame does not leave the operator waiting for the profile's full timeout.
 
 Non-interactive mode always passes `sudo -n`. It does not silently fall back to an interactive
 prompt. `status` also uses a non-prompting validation. `release` calls `sudo -k` to invalidate the
