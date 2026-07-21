@@ -5,9 +5,8 @@ Doctor after installation and before adding a production profile.
 
 ## Published release
 
-Once version 0.1 is published, it is distributed as a Python 3.12 wheel and started checkout-free
-through `uvx`. Use one exact version for the installer and MCP process. The current source is the
-untagged `0.1.0` candidate and must still use the local-wheel flow below until publication.
+Version `0.1.0` is published as a Python 3.12 wheel and starts checkout-free through `uvx`. Use the
+same exact version for the installer and MCP process.
 
 ```powershell
 $Version = "0.1.0"
@@ -18,6 +17,32 @@ uvx --from "codex-serverops-mcp==$Version" serverops-install check
 `setup` prepares `%LOCALAPPDATA%\codex-serverops-mcp`, an empty schema-versioned profile file when
 needed, current-user-only runtime/audit directories and migrations. It does not modify Codex
 configuration or contact a server.
+
+## Codex plugin marketplace
+
+The repository contains a Codex plugin under `plugins/codex-serverops-mcp` and a repo marketplace
+named `serverops-codex`. After running `setup`, install both from the public repository:
+
+```powershell
+codex plugin marketplace add cyyprezz/codex-serverops-mcp
+codex plugin add codex-serverops-mcp@serverops-codex
+```
+
+Start a new Codex task afterward. The plugin starts
+`uvx --from codex-serverops-mcp==0.1.0 codex-serverops-mcp`, uses a 60-second startup timeout and
+retains the 3730-second tool timeout required by the maximum supported remote command timeout.
+
+Do not combine the plugin with a separate user-wide `[mcp_servers.serverops]` table. If the
+installer previously created its marked block, preview and remove only that block before using the
+plugin:
+
+```powershell
+uvx --from "codex-serverops-mcp==0.1.0" serverops-install codex-config --remove
+uvx --from "codex-serverops-mcp==0.1.0" serverops-install codex-config --remove --apply
+```
+
+This preserves profiles, audit logs, runtime state and any separately managed broker task. The
+plugin does not install a broker task or change user configuration on its own.
 
 Preview the persistent current-user broker task separately:
 
@@ -37,6 +62,9 @@ keeps the broker outside Codex's disposable MCP process tree. An unrelated task 
 SID-derived name is never replaced.
 
 ## Codex configuration
+
+This direct user-wide configuration is an alternative to the Codex plugin. Do not enable both for
+the `serverops` MCP name.
 
 Preview the complete proposed user-wide block:
 
