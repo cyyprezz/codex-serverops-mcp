@@ -84,14 +84,41 @@ sandbox.
 
 ## Getting started
 
-The package is not published as `0.1.0` yet. Choose the matching path in
+Version `0.1.0` is published on PyPI. Choose the matching path in
 [Windows installation and Doctor](docs/installation.md):
 
-- use the exact PyPI pin after a public release; or
+- install the repository's Codex plugin marketplace;
+- use the direct exact-PyPI-pin Codex configuration; or
 - use the explicitly marked local-wheel flow when evaluating a development checkout.
 
 After restarting Codex, follow [Getting started](docs/getting-started.md) to create the first
 profile, open a session and verify the connection without putting a credential into chat.
+
+## Codex plugin
+
+The repository includes a local-first Codex plugin that starts the exact public package through
+`uvx` and bundles the `serverops-control` safety workflow. Prepare local ServerOps state once:
+
+```powershell
+uvx --from "codex-serverops-mcp==0.1.0" serverops-install setup
+```
+
+Then install the repository marketplace and plugin:
+
+```powershell
+codex plugin marketplace add cyyprezz/codex-serverops-mcp
+codex plugin add codex-serverops-mcp@serverops-codex
+```
+
+Start a new Codex task after installation. The plugin already supplies the `serverops` MCP entry;
+do not keep or add a separate user-wide `[mcp_servers.serverops]` block. Existing users can preview
+and then remove only the installer-managed block without deleting profiles, audit data, or the
+broker task:
+
+```powershell
+uvx --from "codex-serverops-mcp==0.1.0" serverops-install codex-config --remove
+uvx --from "codex-serverops-mcp==0.1.0" serverops-install codex-config --remove --apply
+```
 
 ## Documentation
 
@@ -106,6 +133,7 @@ profile, open a session and verify the connection without putting a credential i
 - [Security model and audit](docs/security.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [Architecture](docs/architecture.md)
+- [Codex plugin installation](docs/installation.md#codex-plugin-marketplace)
 - [Release evidence and final-candidate procedure](docs/release-evidence.md)
 
 ## Development

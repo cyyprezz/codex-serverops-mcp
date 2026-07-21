@@ -1,0 +1,20 @@
+{
+  "name": "serverops-codex",
+  "interface": {
+    "displayName": "ServerOps Codex"
+  },
+  "plugins": [
+    {
+      "name": "codex-serverops-mcp",
+      "source": {
+        "source": "local",
+        "path": "./plugins/codex-serverops-mcp"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "name": "codex-serverops-mcp",
+  "version": "0.1.0",
+  "description": "Operate explicitly configured Linux servers from Codex through local, stateful OpenSSH sessions.",
+  "author": {
+    "name": "Nicklas Desens",
+    "email": "nicklas@desens.dev",
+    "url": "https://github.com/cyyprezz"
+  },
+  "homepage": "https://github.com/cyyprezz/codex-serverops-mcp",
+  "repository": "https://github.com/cyyprezz/codex-serverops-mcp",
+  "license": "MIT",
+  "keywords": [
+    "ssh",
+    "server-operations",
+    "mcp",
+    "local-first"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Codex ServerOps MCP",
+    "shortDescription": "Operate configured Linux servers through local SSH.",
+    "longDescription": "Use persistent Windows OpenSSH sessions, structured remote file tools, visible local authentication, and guided sudo without placing credentials in MCP arguments.",
+    "developerName": "Nicklas Desens",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Read",
+      "Write",
+      "Interactive"
+    ],
+    "websiteURL": "https://github.com/cyyprezz/codex-serverops-mcp",
+    "defaultPrompt": [
+      "List my ServerOps profiles and summarize their configured capabilities.",
+      "Open a ServerOps session and run safe read-only checks.",
+      "Inspect a configured remote project without changing it."
+    ]
+  }
+}
