@@ -25,7 +25,9 @@ class LocalChecker:
     paths: InstallPaths
     broker: BrokerManager | None = None
 
-    def run(self, *, include_broker: bool) -> CheckReport:
+    def run(self, *, include_broker: bool, client: str = "codex") -> CheckReport:
+        if client not in {"core", "codex", "claude", "all"}:
+            raise ValueError(f"unsupported client check: {client}")
         checks = [
             self._platform(),
             self._python(),
@@ -33,12 +35,25 @@ class LocalChecker:
             self._ssh(),
             self._package_contract(),
             self._profiles(),
-            self._codex_config(),
             self._local_security(),
         ]
+        if client in {"codex", "all"}:
+            checks.append(self._codex_config())
+        if client in {"claude", "all"}:
+            checks.append(self._claude_code())
         if include_broker:
             checks.extend(self._broker())
         return CheckReport(tuple(checks))
+
+    @staticmethod
+    def _claude_code() -> CheckResult:
+        executable = shutil.which("claude")
+        if executable:
+            return passed("claude_code", f"Claude Code CLI found at {executable}")
+        return failed(
+            "claude_code_missing",
+            "Claude Code CLI was not found on PATH; plugin state is owned by Claude Code",
+        )
 
     @staticmethod
     def _platform() -> CheckResult:

@@ -41,6 +41,7 @@ class InstallerCliTests(unittest.TestCase):
             ):
                 self.assertEqual(run(["codex-config"]), 0)
             self.assertFalse(path.exists())
+            self.assertFalse((root / "local" / "codex-serverops-mcp").exists())
             self.assertIn(f"codex-serverops-mcp=={PACKAGE_VERSION}", output.getvalue())
 
             with (
@@ -165,6 +166,130 @@ class InstallerCliTests(unittest.TestCase):
             ):
                 self.assertEqual(run(["setup", "--apply", "--yes"]), 1)
             self.assertFalse((root / "local" / "codex-serverops-mcp").exists())
+
+    def test_setup_twice_is_idempotent_and_preserves_both_client_configs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            environment = {
+                "LOCALAPPDATA": str(root / "local"),
+                "USERPROFILE": str(root / "user"),
+            }
+            codex = root / "user" / ".codex" / "config.toml"
+            claude = root / "user" / ".claude" / "settings.json"
+            codex.parent.mkdir(parents=True)
+            claude.parent.mkdir(parents=True)
+            codex.write_text("[features]\nforeign = true\n", encoding="utf-8")
+            claude.write_text('{"foreign":true}\n', encoding="utf-8")
+            client_snapshot = {path: path.read_bytes() for path in (codex, claude)}
+            with (
+                patch.dict(os.environ, environment, clear=True),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(run(["setup"]), 0)
+                app = root / "local" / "codex-serverops-mcp"
+                stable = {
+                    path: (path.read_bytes(), path.stat().st_mtime_ns)
+                    for path in (app / "config.toml", app / "state.json")
+                }
+                self.assertEqual(run(["setup"]), 0)
+            self.assertEqual(
+                stable,
+                {
+                    path: (path.read_bytes(), path.stat().st_mtime_ns)
+                    for path in stable
+                },
+            )
+            self.assertEqual(client_snapshot, {path: path.read_bytes() for path in client_snapshot})
+
+    def test_client_selector_defaults_to_codex_and_accepts_claude(self) -> None:
+        parser = build_parser()
+        self.assertEqual(parser.parse_args(["check"]).client, "codex")
+        self.assertEqual(parser.parse_args(["doctor", "--client", "claude"]).client, "claude")
+
+    def test_plugin_only_uninstall_is_idempotent_and_does_not_recreate_local_state(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            environment = {
+                "LOCALAPPDATA": str(root / "local"),
+                "USERPROFILE": str(root / "user"),
+            }
+            controller = Mock()
+            controller.inspect.return_value = BrokerTaskStatus(
+                "ServerOps test task", False, False, False
+            )
+            with (
+                patch.dict(os.environ, environment, clear=True),
+                patch(
+                    "codex_serverops_mcp.installer.cli.BrokerTaskController.connect",
+                    return_value=controller,
+                ),
+                contextlib.redirect_stdout(io.StringIO()),
+                contextlib.redirect_stderr(io.StringIO()),
+            ):
+                self.assertEqual(run(["uninstall"]), 0)
+            self.assertFalse((root / "local" / "codex-serverops-mcp").exists())
+            self.assertFalse((root / "user" / ".codex" / "config.toml").exists())
+
+    def test_uninstall_preserves_data_until_remove_data_is_explicitly_applied(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            environment = {
+                "LOCALAPPDATA": str(root / "local"),
+                "USERPROFILE": str(root / "user"),
+            }
+            controller = Mock()
+            controller.inspect.return_value = BrokerTaskStatus(
+                "ServerOps test task", False, False, False
+            )
+            controller.remove.return_value = False
+            with (
+                patch.dict(os.environ, environment, clear=True),
+                patch(
+                    "codex_serverops_mcp.installer.cli.BrokerTaskController.connect",
+                    return_value=controller,
+                ),
+                patch("codex_serverops_mcp.installer.cli._shutdown_broker"),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(run(["setup"]), 0)
+                app = root / "local" / "codex-serverops-mcp"
+                audit = app / "audit" / "existing.jsonl"
+                audit.write_text('{"event":"keep"}\n', encoding="utf-8")
+                config_before = (app / "config.toml").read_bytes()
+
+                self.assertEqual(run(["uninstall", "--apply", "--yes"]), 0)
+                self.assertEqual((app / "config.toml").read_bytes(), config_before)
+                self.assertEqual(audit.read_text(encoding="utf-8"), '{"event":"keep"}\n')
+
+                self.assertEqual(run(["uninstall", "--remove-data"]), 0)
+                self.assertTrue(app.exists())
+                self.assertEqual(
+                    run(["uninstall", "--remove-data", "--apply", "--yes"]),
+                    0,
+                )
+                self.assertFalse(app.exists())
+
+    def test_update_uses_client_neutral_checks(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            environment = {
+                "LOCALAPPDATA": str(root / "local"),
+                "USERPROFILE": str(root / "user"),
+            }
+            report = Mock(succeeded=True)
+            report.checks = ()
+            report.status = "pass"
+            with (
+                patch.dict(os.environ, environment, clear=True),
+                patch("codex_serverops_mcp.installer.cli.LocalChecker") as checker,
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                checker.return_value.run.return_value = report
+                self.assertEqual(run(["update"]), 0)
+            checker.return_value.run.assert_called_once_with(
+                include_broker=False,
+                client="core",
+            )
 
 
 if __name__ == "__main__":

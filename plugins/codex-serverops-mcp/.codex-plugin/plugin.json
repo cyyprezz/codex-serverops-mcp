@@ -1,7 +1,7 @@
 {
   "name": "codex-serverops-mcp",
-  "version": "0.1.0",
-  "description": "Operate explicitly configured Linux servers from Codex through local, stateful OpenSSH sessions.",
+  "version": "0.1.1",
+  "description": "Operate chosen Linux servers with stateful sessions and no remote ServerOps agent.",
   "author": {
     "name": "Nicklas Desens",
     "email": "nicklas@desens.dev",
@@ -19,11 +19,11 @@
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
-    "displayName": "Codex ServerOps MCP",
-    "shortDescription": "Operate configured Linux servers through local SSH.",
-    "longDescription": "Use persistent Windows OpenSSH sessions, structured remote file tools, visible local authentication, and guided sudo without placing credentials in MCP arguments.",
+    "displayName": "ServerOps",
+    "shortDescription": "Operate chosen Linux servers through normal conversation.",
+    "longDescription": "Keep useful Bash state between operations, use structured remote text tools, and handle OpenSSH or sudo input in visible local windows without installing a ServerOps agent on the Linux server.",
     "developerName": "Nicklas Desens",
-    "category": "Developer Tools",
+    "category": "Productivity",
     "capabilities": [
       "Read",
       "Write",

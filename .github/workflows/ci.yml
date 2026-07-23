@@ -35,6 +35,12 @@ jobs:
           ruff check .
           uv build
 
+      - name: Validate Claude Code marketplace and plugin
+        shell: pwsh
+        run: |
+          npx.cmd --yes @anthropic-ai/claude-code@2.1.206 plugin validate . --strict
+          npx.cmd --yes @anthropic-ai/claude-code@2.1.206 plugin validate ./plugins/claude-serverops-mcp --strict
+
       - name: Verify distributions and checkout-free commands
         shell: pwsh
         run: |
@@ -54,3 +60,9 @@ jobs:
           python scripts/stdio_surface_smoke.py $wheel.FullName --cache-dir $smokeCache
           uvx --offline --cache-dir $smokeCache --from $wheel.FullName serverops-install --version
           python scripts/stdio_surface_smoke.py $wheel.FullName --offline --cache-dir $smokeCache
+          python scripts/stdio_surface_smoke.py $wheel.FullName --offline --cache-dir $smokeCache --manifest plugins/codex-serverops-mcp/.mcp.json --repeat 2
+          python scripts/stdio_surface_smoke.py $wheel.FullName --offline --cache-dir $smokeCache --manifest plugins/claude-serverops-mcp/.mcp.json --repeat 2
+
+          New-Item -ItemType Directory -Force -Path checksums | Out-Null
+          python scripts/artifact_checksums.py create checksums/SHA256SUMS.txt $wheel.FullName $sdist.FullName
+          python scripts/artifact_checksums.py verify checksums/SHA256SUMS.txt dist

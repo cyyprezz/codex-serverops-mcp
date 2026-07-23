@@ -393,10 +393,19 @@ class BrokerServer:
 
 
 def main() -> None:
+    from codex_serverops_mcp.bootstrap import LocalStatePaths, ensure_local_state
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--runtime", type=Path)
     args = parser.parse_args()
-    server = BrokerServer(args.runtime.resolve() if args.runtime else None)
+    runtime = args.runtime.resolve() if args.runtime else None
+    paths = (
+        LocalStatePaths.from_runtime_path(runtime)
+        if runtime is not None
+        else LocalStatePaths.from_environment()
+    )
+    ensure_local_state(paths)
+    server = BrokerServer(runtime)
     server.serve_forever()
 
 if __name__ == "__main__":

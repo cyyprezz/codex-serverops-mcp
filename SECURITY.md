@@ -7,5 +7,5 @@ and omit exploit details from an initial unencrypted message so a suitable priva
 arranged.
 
 The supported security boundary and known limitations are documented in
-[`docs/security.md`](docs/security.md). Version `0.0.0.dev1` is still a development build and must
-not be represented as the completed `0.1.0` release.
+[`docs/security.md`](docs/security.md). Version `0.1.1` remains alpha software; release-candidate
+working trees and wheels must not be represented as published until the signed release completes.

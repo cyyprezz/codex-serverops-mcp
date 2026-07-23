@@ -53,6 +53,55 @@ class BrokerReconnectTests(unittest.TestCase):
             finally:
                 self._stop_process(process)
 
+    def test_hard_broker_restart_does_not_leave_unadoptable_worker(self) -> None:
+        from codex_serverops_mcp.broker.client import BrokerClient
+        from codex_serverops_mcp.broker.server import _process_is_alive
+        from codex_serverops_mcp.runtime import RuntimeDirectory
+
+        with tempfile.TemporaryDirectory() as temporary:
+            runtime_path = Path(temporary) / "runtime"
+            runtime = RuntimeDirectory(runtime_path)
+            first = self._start_broker(runtime_path)
+            replacement: subprocess.Popen[str] | None = None
+            worker_pid: int | None = None
+            worker_status: Path | None = None
+            try:
+                self._wait_for_path(runtime.broker_status_path, first)
+                with BrokerClient(runtime_path) as client:
+                    first_pid = int(client.request("broker.ping")["pid"])
+                    created = client.request(
+                        "session.create",
+                        {"profile_name": "test-profile"},
+                    )
+                worker_pid = int(created["worker_pid"])
+                worker_status = runtime.worker_status_path(str(created["session_id"]))
+                self.assertTrue(worker_status.exists())
+
+                first.terminate()
+                first.wait(timeout=10)
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline:
+                    if not _process_is_alive(worker_pid) and not worker_status.exists():
+                        break
+                    time.sleep(0.05)
+                self.assertFalse(_process_is_alive(worker_pid))
+                self.assertFalse(worker_status.exists())
+
+                replacement = self._start_broker(runtime_path)
+                replacement_pid = self._wait_for_broker_pid(runtime_path, replacement, first_pid)
+                self.assertNotEqual(replacement_pid, first_pid)
+                with BrokerClient(runtime_path) as client:
+                    self.assertEqual(client.request("session.list")["sessions"], [])
+                    client.request("broker.shutdown")
+                replacement.wait(timeout=10)
+                self.assertEqual(replacement.returncode, 0, self._stderr(replacement))
+            finally:
+                self._stop_process(first)
+                if replacement is not None:
+                    self._stop_process(replacement)
+                if worker_pid is not None and _process_is_alive(worker_pid):
+                    self.fail("worker remained alive after hard broker termination")
+
     @staticmethod
     def _start_broker(runtime_path: Path) -> subprocess.Popen[str]:
         return subprocess.Popen(
@@ -83,6 +132,32 @@ class BrokerReconnectTests(unittest.TestCase):
                 )
             time.sleep(0.05)
         raise AssertionError("broker did not publish startup status")
+
+    @staticmethod
+    def _wait_for_broker_pid(
+        runtime_path: Path,
+        process: subprocess.Popen[str],
+        previous_pid: int,
+    ) -> int:
+        from codex_serverops_mcp.broker.client import BrokerClient
+        from codex_serverops_mcp.broker.errors import BrokerUnavailable
+
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            if process.poll() is not None:
+                raise AssertionError(
+                    f"replacement broker exited with code {process.returncode}: "
+                    f"{BrokerReconnectTests._stderr(process)}"
+                )
+            try:
+                with BrokerClient(runtime_path) as client:
+                    pid = int(client.request("broker.ping")["pid"])
+                if pid != previous_pid:
+                    return pid
+            except BrokerUnavailable:
+                pass
+            time.sleep(0.05)
+        raise AssertionError("replacement broker did not become reachable")
 
     @staticmethod
     def _stderr(process: subprocess.Popen[str]) -> str:

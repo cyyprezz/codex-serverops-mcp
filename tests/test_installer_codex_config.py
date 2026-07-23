@@ -145,8 +145,10 @@ class CodexConfigTests(unittest.TestCase):
         removal = plan_codex_config_change(self.path, "0.1.0", remove=True)
         apply_codex_config_change(self.path, removal)
         self.assertEqual(self.path.read_text(encoding="utf-8"), "")
-        with self.assertRaisesRegex(InstallerError, "no installer-managed"):
-            plan_codex_config_change(self.path, "0.1.0", remove=True)
+        no_op = plan_codex_config_change(self.path, "0.1.0", remove=True)
+        apply_codex_config_change(self.path, no_op)
+        self.assertEqual(no_op.previous, no_op.updated)
+        self.assertEqual(self.path.read_text(encoding="utf-8"), "")
 
     def test_failed_post_write_validation_rolls_back(self) -> None:
         self.path.parent.mkdir(parents=True)

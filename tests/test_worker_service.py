@@ -25,6 +25,7 @@ class FakeSession:
         self.open_allows_sudo = False
         self.execute_allows_sudo: list[bool] = []
         self.execute_sudo_tokens: list[str | None] = []
+        self.execute_timeouts: list[float] = []
         self.closed = False
         self.open_environment: dict[str, str] = {}
         self.open_sudo_prompt_token: str | None = None
@@ -60,6 +61,7 @@ class FakeSession:
         self.state.require(SessionState.READY)
         self.execute_allows_sudo.append(allow_sudo_prompt)
         self.execute_sudo_tokens.append(sudo_prompt_token)
+        self.execute_timeouts.append(timeout)
         return ExecutionResult(
             output="0" if command == "id -u" else f"ran:{command}",
             exit_code=0,
@@ -169,6 +171,51 @@ class WorkerSessionServiceTests(unittest.TestCase):
             self.assertTrue(inspect_path_security(str(known_hosts)).current_user_only)
             service.close()
             self.assertTrue(sessions[0].closed)
+
+    def test_documented_maximum_timeout_reaches_the_session_unchanged(self) -> None:
+        from codex_serverops_mcp.worker.service import WorkerSessionService
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repository = TomlProfileRepository(root / "config.toml")
+            repository.save(
+                ServerOpsConfig(
+                    profiles={
+                        "prod": ServerProfile(
+                            display_name="Maximum timeout",
+                            connection_type=ConnectionType.DIRECT,
+                            authentication=Authentication.OPENSSH,
+                            host="192.0.2.20",
+                            port=22,
+                            user="deploy",
+                            command_timeout_seconds=3_600,
+                        )
+                    }
+                )
+            )
+            sessions: list[FakeSession] = []
+            relays: list[FakeAskpassRelay] = []
+
+            def session_factory(_profile, _auth_target):
+                session = FakeSession()
+                sessions.append(session)
+                return session
+
+            service = WorkerSessionService(
+                "prod",
+                repository=repository,
+                ssh_finder=lambda: Path("C:/Windows/System32/OpenSSH/ssh.exe"),
+                target_resolver=lambda _profile, _ssh: ResolvedSshTarget(
+                    "192.0.2.20", 22, "deploy"
+                ),
+                session_factory=session_factory,
+                askpass_relay_factory=relay_factory(relays),
+                known_hosts_path=root / "known_hosts",
+            )
+            service.open()
+            service.execute("printf done", timeout=3_600)
+            self.assertEqual(sessions[0].execute_timeouts[-1], 3_600)
+            service.close()
 
     def test_root_worker_uses_separate_sudo_shell_and_disables_file_tools(self) -> None:
         from codex_serverops_mcp.files.errors import RemoteFileError

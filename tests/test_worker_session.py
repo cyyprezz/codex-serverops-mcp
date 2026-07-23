@@ -88,7 +88,7 @@ class FakeTerminal:
         pending = bytes(self.command_input)
         match = TOKEN.search(pending)
         if match:
-            if not pending.endswith(b"fi\n"):
+            if not pending.endswith((b"fi\n", b"fi\n}\n")):
                 return
             token = match.group(1)
             nonce = SHELL_NONCE.search(pending)

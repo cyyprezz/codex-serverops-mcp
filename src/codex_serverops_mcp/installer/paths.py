@@ -5,6 +5,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from codex_serverops_mcp.bootstrap import LocalStatePaths
+
 from .errors import InstallerError
 
 
@@ -32,3 +34,6 @@ class InstallPaths:
             audit_dir=app_dir / "audit",
             codex_config_file=codex_home / "config.toml",
         )
+
+    def local_state_paths(self) -> LocalStatePaths:
+        return LocalStatePaths.from_app_dir(self.app_dir, runtime_dir=self.runtime_dir)

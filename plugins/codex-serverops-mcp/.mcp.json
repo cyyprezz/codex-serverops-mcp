@@ -1,12 +1,12 @@
 {
   "mcpServers": {
     "serverops": {
-      "title": "Codex ServerOps MCP",
+      "title": "ServerOps",
       "description": "Operate explicitly configured Linux servers through local stateful OpenSSH sessions.",
       "command": "uvx",
       "args": [
         "--from",
-        "codex-serverops-mcp==0.1.0",
+        "codex-serverops-mcp==0.1.1",
         "codex-serverops-mcp"
       ],
       "startup_timeout_sec": 60,

@@ -70,6 +70,7 @@ def run_worker(
                 except IpcClosed:
                     break
                 with connection:
+                    authenticated = False
                     try:
                         server_handshake(
                             connection,
@@ -77,6 +78,7 @@ def run_worker(
                             expected_role="broker",
                             timeout=IPC_HANDSHAKE_TIMEOUT_SECONDS,
                         )
+                        authenticated = True
                         while not stop:
                             request = connection.receive(
                                 frame_timeout=IPC_FRAME_TIMEOUT_SECONDS
@@ -121,6 +123,8 @@ def run_worker(
                                     },
                                 )
                     except IpcError:
+                        if authenticated:
+                            break
                         continue
         finally:
             status_path.unlink(missing_ok=True)

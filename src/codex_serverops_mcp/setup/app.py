@@ -57,9 +57,12 @@ def run_setup_app(
 
 
 def main() -> None:
+    from codex_serverops_mcp.bootstrap import ensure_local_state
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--request-id", required=True)
     args = parser.parse_args()
+    ensure_local_state()
     raise SystemExit(run_setup_app(args.request_id))
 
 

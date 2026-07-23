@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "serverops": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "codex-serverops-mcp==0.1.1",
+        "codex-serverops-mcp"
+      ],
+      "timeout": 3730000
+    }
+  }
+}

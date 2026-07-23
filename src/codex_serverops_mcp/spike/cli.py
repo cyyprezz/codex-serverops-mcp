@@ -145,7 +145,7 @@ def _ssh_arguments(
                 "PasswordAuthentication=no",
             ]
         )
-    arguments.extend(["127.0.0.1", "bash", "--noprofile", "--norc", "-i"])
+    arguments.extend(["--", "127.0.0.1", "bash", "--noprofile", "--norc", "-i"])
     return arguments
 
 
@@ -429,7 +429,11 @@ def run_spike(project_root: Path, *, visible_auth: bool = False) -> dict[str, ob
         _stop_container()
         lost_thread.join(timeout=10)
         _assert_result(not lost_thread.is_alive(), "disconnect was not detected")
-        _assert_result(isinstance(outcome.get("error"), OutcomeUnknown), "outcome was not unknown")
+        _assert_result(
+            isinstance(outcome.get("error"), OutcomeUnknown),
+            "outcome was not unknown: "
+            f"error={outcome.get('error')!r}, result={outcome.get('result')!r}",
+        )
         checks["network_disconnect"] = "passed"
         checks["outcome_unknown_without_retry"] = "passed"
         lost_session.close()
