@@ -104,6 +104,13 @@ class BrokerReconnectTests(unittest.TestCase):
 
     @staticmethod
     def _start_broker(runtime_path: Path) -> subprocess.Popen[str]:
+        environment = dict(os.environ)
+        environment.update(
+            {
+                "LOCALAPPDATA": str(runtime_path.parent / "local"),
+                "USERPROFILE": str(runtime_path.parent / "user"),
+            }
+        )
         return subprocess.Popen(
             [
                 sys.executable,
@@ -115,6 +122,7 @@ class BrokerReconnectTests(unittest.TestCase):
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
+            env=environment,
             text=True,
             creationflags=subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP,
         )

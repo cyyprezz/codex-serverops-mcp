@@ -3,7 +3,7 @@
 All notable changes are documented here. The project follows Keep a Changelog and uses semantic
 versions for published releases.
 
-## 0.1.1 — Unreleased release candidate
+## 0.1.1 — 2026-07-30
 
 ### 0.1.1C release hardening
 

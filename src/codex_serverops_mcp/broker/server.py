@@ -399,11 +399,7 @@ def main() -> None:
     parser.add_argument("--runtime", type=Path)
     args = parser.parse_args()
     runtime = args.runtime.resolve() if args.runtime else None
-    paths = (
-        LocalStatePaths.from_runtime_path(runtime)
-        if runtime is not None
-        else LocalStatePaths.from_environment()
-    )
+    paths = LocalStatePaths.from_environment(runtime_dir=runtime)
     ensure_local_state(paths)
     server = BrokerServer(runtime)
     server.serve_forever()

@@ -39,6 +39,13 @@ without removing profiles, audit, or an independently managed broker task.
 - Claude Desktop, `ServerOpsSetup.exe`, persistent jobs, incident timelines, fleet rollout, backup
   assurance, and native database adapters remain planned rather than shipped.
 
+## What comes next
+
+The next planned release is ServerOps 0.1.2 with a self-contained Windows runtime, a guided
+`ServerOpsSetup.exe` installer, and graphical onboarding. It will be published only after its
+signing, clean-Windows lifecycle, and supported-client gates pass. See the
+[ServerOps roadmap](../ROADMAP.md) for the later operations-runtime phases.
+
 ## Release verification
 
 The release is blocked until the exact candidate passes [release-checklist.md](release-checklist.md),

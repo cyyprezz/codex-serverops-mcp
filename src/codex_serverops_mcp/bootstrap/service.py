@@ -37,12 +37,15 @@ class LocalStateBootstrapper:
             ):
                 self._ensure_directory(path)
             self._reject_reparse_or_wrong_type(self.paths.config_file, directory=False)
+            config_lock = self.paths.config_file.with_name(
+                f"{self.paths.config_file.name}.lock"
+            )
+            self._ensure_lock_file(config_lock)
             preparation = TomlProfileRepository(
                 self.paths.config_file,
                 lock_timeout=self.lock_timeout,
             ).initialize_or_migrate(migration_backup_dir=self.paths.migrations_dir)
             self._secure(self.paths.config_file, directory=False)
-            self._secure(self.paths.config_file.with_name("config.toml.lock"), directory=False)
             self._ensure_lock_file(self.paths.audit_dir / ".audit.lock")
             self._ensure_state()
         return BootstrapReport(

@@ -52,12 +52,6 @@ class LocalStatePaths:
             bootstrap_lock=root / ".bootstrap.lock",
         )
 
-    @classmethod
-    def from_runtime_path(cls, runtime_dir: Path) -> LocalStatePaths:
-        runtime = Path(os.path.abspath(runtime_dir))
-        return cls.from_app_dir(runtime.parent, runtime_dir=runtime)
-
-
 @dataclass(frozen=True, slots=True)
 class BootstrapReport:
     app_dir: Path

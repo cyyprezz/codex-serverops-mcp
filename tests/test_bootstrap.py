@@ -22,12 +22,16 @@ class BootstrapTests(unittest.TestCase):
     def _paths(self, root: Path) -> LocalStatePaths:
         return LocalStatePaths.from_app_dir(root / "codex-serverops-mcp")
 
-    def test_explicit_runtime_path_uses_an_isolated_state_root(self) -> None:
+    def test_explicit_runtime_path_does_not_relocate_application_state(self) -> None:
+        app_data = Path("C:/Users/example/AppData/Local")
         runtime = Path("C:/isolated/serverops/runtime")
-        paths = LocalStatePaths.from_runtime_path(runtime)
+        paths = LocalStatePaths.from_environment(
+            {"LOCALAPPDATA": str(app_data)},
+            runtime_dir=runtime,
+        )
         self.assertEqual(paths.runtime_dir, runtime)
-        self.assertEqual(paths.app_dir, runtime.parent)
-        self.assertEqual(paths.config_file, runtime.parent / "config.toml")
+        self.assertEqual(paths.app_dir, app_data / "codex-serverops-mcp")
+        self.assertEqual(paths.config_file, paths.app_dir / "config.toml")
 
     def test_first_run_creates_only_managed_empty_state_and_second_is_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -187,6 +191,18 @@ class BootstrapTests(unittest.TestCase):
             with self.assertRaisesRegex(ConfigurationError, "must be a directory"):
                 LocalStateBootstrapper(paths).ensure()
             self.assertEqual(paths.runtime_dir.read_bytes(), b"not a directory")
+
+    def test_config_lock_replaced_by_directory_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            paths = self._paths(Path(directory))
+            paths.app_dir.mkdir()
+            config_lock = paths.config_file.with_name(f"{paths.config_file.name}.lock")
+            config_lock.mkdir()
+
+            with self.assertRaisesRegex(ConfigurationError, "must be a file"):
+                LocalStateBootstrapper(paths).ensure()
+
+            self.assertTrue(config_lock.is_dir())
 
     @unittest.skipUnless(os.name == "nt", "current-user DACL contract is Windows-only")
     def test_every_managed_path_is_current_user_only(self) -> None:

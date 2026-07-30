@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import os
 import sys
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 from codex_serverops_mcp import server
@@ -26,23 +29,41 @@ class BootstrapEntrypointTests(unittest.TestCase):
         self.assertEqual(events, ["bootstrap", "run"])
 
     def test_broker_main_bootstraps_before_server_construction(self) -> None:
-        events: list[str] = []
-        instance = Mock()
-        instance.serve_forever.side_effect = lambda: events.append("serve")
-        with (
-            patch.object(sys, "argv", ["serverops-broker"]),
-            patch(
-                "codex_serverops_mcp.bootstrap.ensure_local_state",
-                side_effect=lambda _paths: events.append("bootstrap"),
-            ),
-            patch.object(
-                broker_server,
-                "BrokerServer",
-                side_effect=lambda _path: events.append("construct") or instance,
-            ),
-        ):
-            broker_server.main()
-        self.assertEqual(events, ["bootstrap", "construct", "serve"])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runtime = root / "custom-runtime"
+            app_data = root / "local-app-data"
+            events: list[str] = []
+            captured_paths = []
+            instance = Mock()
+            instance.serve_forever.side_effect = lambda: events.append("serve")
+            with (
+                patch.dict(os.environ, {"LOCALAPPDATA": str(app_data)}),
+                patch.object(
+                    sys,
+                    "argv",
+                    ["serverops-broker", "--runtime", str(runtime)],
+                ),
+                patch(
+                    "codex_serverops_mcp.bootstrap.ensure_local_state",
+                    side_effect=lambda paths: (
+                        captured_paths.append(paths),
+                        events.append("bootstrap"),
+                    ),
+                ),
+                patch.object(
+                    broker_server,
+                    "BrokerServer",
+                    side_effect=lambda _path: events.append("construct") or instance,
+                ),
+            ):
+                broker_server.main()
+            self.assertEqual(events, ["bootstrap", "construct", "serve"])
+            self.assertEqual(captured_paths[0].runtime_dir, runtime.resolve())
+            self.assertEqual(
+                captured_paths[0].app_dir,
+                app_data / "codex-serverops-mcp",
+            )
 
     def test_setup_main_bootstraps_before_assistant(self) -> None:
         events: list[str] = []

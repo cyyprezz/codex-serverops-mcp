@@ -279,13 +279,32 @@ class InstallerCliTests(unittest.TestCase):
             report = Mock(succeeded=True)
             report.checks = ()
             report.status = "pass"
+            task_controller = Mock()
+            task_controller.inspect_compatible.return_value = BrokerTaskStatus(
+                "ServerOps test task", False, False, False
+            )
             with (
                 patch.dict(os.environ, environment, clear=True),
                 patch("codex_serverops_mcp.installer.cli.LocalChecker") as checker,
+                patch(
+                    "codex_serverops_mcp.installer.cli.production_broker_task_spec",
+                    return_value=BrokerTaskSpec(
+                        executable=Path(__file__).resolve(),
+                        arguments=("serverops-broker",),
+                        source="unit-test",
+                    ),
+                ) as task_spec,
+                patch(
+                    "codex_serverops_mcp.installer.cli.BrokerTaskController.connect",
+                    return_value=task_controller,
+                ),
                 contextlib.redirect_stdout(io.StringIO()),
             ):
                 checker.return_value.run.return_value = report
                 self.assertEqual(run(["update"]), 0)
+            task_controller.inspect_compatible.assert_called_once_with(
+                task_spec.return_value
+            )
             checker.return_value.run.assert_called_once_with(
                 include_broker=False,
                 client="core",

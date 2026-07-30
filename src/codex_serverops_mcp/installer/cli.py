@@ -125,9 +125,14 @@ def run(arguments: Sequence[str] | None = None) -> int:
             return 0
         if args.command == "update":
             result = prepare_local_install(paths)
+            task_status = BrokerTaskController.connect().inspect_compatible(
+                production_broker_task_spec()
+            )
             print(f"Local state is compatible with package {PACKAGE_VERSION}.")
             if result["config_migrated"]:
                 print("Profile configuration was migrated atomically.")
+            if task_status.exists:
+                print("Managed broker task is pinned to this package version.")
             print("AI client configuration was not changed.")
             return _report(
                 LocalChecker(paths).run(include_broker=False, client="core"),
