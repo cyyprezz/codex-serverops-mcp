@@ -293,8 +293,7 @@ class StatefulSshSession:
                 continue
             self.state.begin_authentication()
             authentication_started = time.monotonic()
-            newline = b"\r" if self.terminal.backend_name == "winpty" else b"\r\n"
-            sink = SecretInputSink(self.terminal.write, newline=newline)
+            sink = SecretInputSink(self.terminal.write, newline=b"\r")
             try:
                 self.authenticator.respond(event, sink)
                 if not sink.used:

@@ -18,11 +18,13 @@ class InterProcessFileLock:
 
     def __enter__(self) -> InterProcessFileLock:
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        _secure_for_current_user(self.path.parent, directory=True)
         lock_file = self.path.open("a+b")
         lock_file.seek(0, os.SEEK_END)
         if lock_file.tell() == 0:
             lock_file.write(b"\0")
             lock_file.flush()
+        _secure_for_current_user(self.path, directory=False)
         deadline = time.monotonic() + self.timeout
         while True:
             try:
@@ -68,3 +70,12 @@ class InterProcessFileLock:
                 fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)  # type: ignore[attr-defined]
         finally:
             lock_file.close()  # type: ignore[attr-defined]
+
+
+def _secure_for_current_user(path: Path, *, directory: bool) -> None:
+    if os.name == "nt":
+        from codex_serverops_mcp.ipc.security import secure_path_for_current_user
+
+        secure_path_for_current_user(str(path), directory=directory)
+    else:  # pragma: no cover - production target is Windows
+        path.chmod(0o700 if directory else 0o600)

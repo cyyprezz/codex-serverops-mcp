@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "serverops",
+  "displayName": "ServerOps",
+  "version": "0.1.1",
+  "description": "Operate chosen Linux servers with stateful sessions and no remote ServerOps agent.",
+  "author": {
+    "name": "Nicklas Desens",
+    "email": "nicklas@desens.dev",
+    "url": "https://github.com/cyyprezz"
+  },
+  "homepage": "https://github.com/cyyprezz/codex-serverops-mcp",
+  "repository": "https://github.com/cyyprezz/codex-serverops-mcp",
+  "license": "MIT",
+  "keywords": ["ssh", "server-operations", "mcp", "local-first"]
+}

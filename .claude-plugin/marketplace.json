@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "serverops-claude",
+  "description": "Operate chosen Linux servers from Claude Code with stateful sessions and visible local authentication.",
+  "owner": {
+    "name": "Nicklas Desens",
+    "email": "nicklas@desens.dev"
+  },
+  "plugins": [
+    {
+      "name": "serverops",
+      "source": "./plugins/claude-serverops-mcp",
+      "description": "Operate configured Linux servers without installing a ServerOps agent on them.",
+      "version": "0.1.1",
+      "category": "productivity",
+      "tags": ["ssh", "linux", "server-operations", "mcp"],
+      "strict": true
+    }
+  ]
+}

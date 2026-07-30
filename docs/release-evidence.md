@@ -123,7 +123,7 @@ Then record the result on the exact stable-version candidate:
 ```powershell
 $env:PYTHONPATH = "src"
 python scripts/manual_release_check.py --output docs/release-evidence.json
-python scripts/verify_release.py --tag v0.1.0 --evidence docs/release-evidence.json
+python scripts/verify_release.py --tag v0.1.1 --evidence docs/release-evidence.json
 ```
 
 The evidence recorder uses exactly four scenario states: `automated`, `manually_verified`,

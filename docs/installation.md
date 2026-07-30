@@ -1,27 +1,30 @@
 # Windows installation and Doctor
 
-ServerOps requires Windows 10 or 11, Windows OpenSSH Client, `uvx` and Python 3.12. Run the local
-Doctor after installation and before adding a production profile.
+ServerOps requires Windows 10 or 11, Windows OpenSSH Client, `uvx` and Python 3.12 for the current
+release line. Codex and Claude Code use separate thin client wrappers over the same MCP core. Run
+the client-specific Doctor after installation and before adding a production profile.
 
-## Published release
+## Version 0.1.1
 
-Version `0.1.0` is published as a Python 3.12 wheel and starts checkout-free through `uvx`. Use the
-same exact version for the installer and MCP process.
+Version `0.1.1` is packaged as a Python 3.12 wheel and starts checkout-free through `uvx` after
+publication. Use the same exact version for the installer and MCP process.
 
 ```powershell
-$Version = "0.1.0"
-uvx --from "codex-serverops-mcp==$Version" serverops-install setup
+$Version = "0.1.1"
 uvx --from "codex-serverops-mcp==$Version" serverops-install check
 ```
 
-`setup` prepares `%LOCALAPPDATA%\codex-serverops-mcp`, an empty schema-versioned profile file when
-needed, current-user-only runtime/audit directories and migrations. It does not modify Codex
-configuration or contact a server.
+MCP, broker, setup, check, Doctor, and update automatically prepare
+`%LOCALAPPDATA%\codex-serverops-mcp`, an empty schema-versioned profile file when needed, and
+current-user-only runtime, audit, migration, status, and lock paths. The idempotent bootstrap does
+not edit AI-client configuration, install a task, create a profile, request administrator rights,
+or contact a server. `serverops-install setup` remains an optional compatible way to run the same
+preparation explicitly.
 
 ## Codex plugin marketplace
 
 The repository contains a Codex plugin under `plugins/codex-serverops-mcp` and a repo marketplace
-named `serverops-codex`. After running `setup`, install both from the public repository:
+named `serverops-codex`. Install both from the public repository:
 
 ```powershell
 codex plugin marketplace add cyyprezz/codex-serverops-mcp
@@ -29,7 +32,7 @@ codex plugin add codex-serverops-mcp@serverops-codex
 ```
 
 Start a new Codex task afterward. The plugin starts
-`uvx --from codex-serverops-mcp==0.1.0 codex-serverops-mcp`, uses a 60-second startup timeout and
+`uvx --from codex-serverops-mcp==0.1.1 codex-serverops-mcp`, uses a 60-second startup timeout and
 retains the 3730-second tool timeout required by the maximum supported remote command timeout.
 
 Do not combine the plugin with a separate user-wide `[mcp_servers.serverops]` table. If the
@@ -37,12 +40,30 @@ installer previously created its marked block, preview and remove only that bloc
 plugin:
 
 ```powershell
-uvx --from "codex-serverops-mcp==0.1.0" serverops-install codex-config --remove
-uvx --from "codex-serverops-mcp==0.1.0" serverops-install codex-config --remove --apply
+uvx --from "codex-serverops-mcp==0.1.1" serverops-install codex-config --remove
+uvx --from "codex-serverops-mcp==0.1.1" serverops-install codex-config --remove --apply
 ```
 
 This preserves profiles, audit logs, runtime state and any separately managed broker task. The
 plugin does not install a broker task or change user configuration on its own.
+
+## Claude Code plugin marketplace
+
+The repository also contains `plugins/claude-serverops-mcp` and the GitHub marketplace
+`serverops-claude`:
+
+```powershell
+claude plugin marketplace add cyyprezz/codex-serverops-mcp
+claude plugin install serverops@serverops-claude
+```
+
+If GitHub shorthand requires an unconfigured SSH key, use
+`claude plugin marketplace add https://github.com/cyyprezz/codex-serverops-mcp.git` instead.
+
+Start a new Claude Code session afterward. Its `.mcp.json` contains only Claude's STDIO fields and
+pins `codex-serverops-mcp==0.1.1` exactly. Do not copy Codex's `startup_timeout_sec` or
+`tool_timeout_sec` fields into the Claude file. Claude uses a `3730000` millisecond tool timeout.
+The plugin does not edit Claude-owned configuration or inspect undocumented Claude state.
 
 Preview the persistent current-user broker task separately:
 
@@ -85,7 +106,7 @@ managed block uses only documented Codex STDIO fields:
 # >>> codex-serverops-mcp managed block >>>
 [mcp_servers.serverops]
 command = "uvx"
-args = ["--from", "codex-serverops-mcp==0.1.0", "codex-serverops-mcp"]
+args = ["--from", "codex-serverops-mcp==0.1.1", "codex-serverops-mcp"]
 startup_timeout_sec = 60
 tool_timeout_sec = 3730
 # <<< codex-serverops-mcp managed block <<<
@@ -108,7 +129,6 @@ uv build
 $Python = (Resolve-Path .\.venv\Scripts\python.exe).Path
 $Wheel = (Get-ChildItem .\dist\*.whl | Select-Object -First 1).FullName
 
-uvx --python $Python --from $Wheel serverops-install setup
 uvx --python $Python --offline --from $Wheel serverops-install codex-config `
   --development-wheel $Wheel `
   --development-python $Python
@@ -127,7 +147,7 @@ The managed-block transaction, confirmation, backup, concurrent-change check and
 identical to the release path. This mode is only a local pre-release gate; replace it with the
 normal exact package pin before release.
 
-The local-wheel flow does not install the published-version broker task. It is suitable for live
+The local-wheel flow does not install the version-pinned broker task. It is suitable for live
 MCP evaluation, but does not claim that a held session survives a Codex restart. Restart Codex
 after applying the block, then continue with [Getting started](getting-started.md).
 
@@ -138,6 +158,17 @@ Local diagnostics, including broker startup, current-user IPC and protocol compa
 ```powershell
 uvx --from "codex-serverops-mcp==$Version" serverops-install doctor
 ```
+
+Select the client explicitly when diagnosing Claude Code or the shared runtime:
+
+```powershell
+uvx --from "codex-serverops-mcp==$Version" serverops-install doctor --client claude
+uvx --from "codex-serverops-mcp==$Version" serverops-install doctor --client core
+```
+
+`--client codex` remains the default for compatibility. `--client all` checks both client paths;
+Claude checks only documented CLI presence and shared prerequisites, never private client
+configuration files.
 
 Full connection and remote preflight:
 

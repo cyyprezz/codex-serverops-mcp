@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import subprocess
 from typing import Any
 
 import pywintypes
@@ -8,6 +10,7 @@ import win32com.client
 import win32con
 import win32security
 
+from codex_serverops_mcp import PACKAGE_VERSION
 from codex_serverops_mcp.errors import ServerOpsError
 from codex_serverops_mcp.ipc.security import current_user_sid_string
 
@@ -201,8 +204,56 @@ class BrokerTaskController:
             raise BrokerTaskError("could not register the per-user broker task") from error
         return self.inspect()
 
-    def start_if_installed(self) -> bool:
+    def inspect_compatible(
+        self,
+        expected: BrokerTaskSpec | str = PACKAGE_VERSION,
+    ) -> BrokerTaskStatus:
         status = self.inspect()
+        if not status.exists:
+            return status
+        if not status.managed:
+            raise BrokerTaskError(
+                f"scheduled task name is occupied by an unmanaged task: {self.task_name}"
+            )
+        if isinstance(expected, BrokerTaskSpec):
+            expected_executable = str(expected.executable)
+            expected_arguments = expected.argument_line
+        else:
+            expected_executable = status.executable
+            expected_arguments = subprocess.list2cmdline(
+                [
+                    "--from",
+                    f"codex-serverops-mcp=={expected}",
+                    "serverops-broker",
+                ]
+            )
+        executable_matches = (
+            expected_executable is None
+            or status.executable is not None
+            and _same_executable(status.executable, expected_executable)
+        )
+        if not executable_matches or status.arguments != expected_arguments:
+            raise BrokerTaskError(
+                "managed broker task is pinned to a different ServerOps runtime; "
+                "refresh it explicitly with 'serverops-install setup --broker-task "
+                "--apply --yes'"
+            )
+        return status
+
+    def start_if_installed(
+        self,
+        *,
+        expected: BrokerTaskSpec | str | None = None,
+        expected_version: str | None = None,
+    ) -> bool:
+        if expected is not None and expected_version is not None:
+            raise ValueError("expected and expected_version are mutually exclusive")
+        compatibility = expected if expected is not None else expected_version
+        status = (
+            self.inspect()
+            if compatibility is None
+            else self.inspect_compatible(compatibility)
+        )
         if not status.exists:
             return False
         if not status.managed:
@@ -248,3 +299,9 @@ def _hresult(error: pywintypes.com_error) -> int:
     ):
         return details[5] & 0xFFFFFFFF
     return int(error.hresult) & 0xFFFFFFFF
+
+
+def _same_executable(actual: str, expected: str) -> bool:
+    return os.path.normcase(os.path.abspath(actual)) == os.path.normcase(
+        os.path.abspath(expected)
+    )

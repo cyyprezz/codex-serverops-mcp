@@ -31,6 +31,14 @@ class ConfigSnapshot:
     content_hash: str
 
 
+@dataclass(frozen=True, slots=True)
+class ConfigPreparation:
+    snapshot: ConfigSnapshot
+    created: bool
+    migrated: bool
+    backup_path: Path | None
+
+
 class TomlProfileRepository:
     def __init__(self, path: Path | None = None, *, lock_timeout: float = 5.0) -> None:
         self.path = (path or default_config_path()).resolve()
@@ -47,6 +55,33 @@ class TomlProfileRepository:
             if not migrated:
                 return snapshot, False
             return self._write_unlocked(snapshot.config), True
+
+    def initialize_or_migrate(self, *, migration_backup_dir: Path) -> ConfigPreparation:
+        with self._lock():
+            if not self.path.exists():
+                snapshot = self._write_unlocked(ServerOpsConfig.empty())
+                return ConfigPreparation(snapshot, True, False, None)
+            original = self.path.read_bytes()
+            snapshot, migrated = self._load_unlocked()
+            if not migrated:
+                return ConfigPreparation(snapshot, False, False, None)
+            backup_path = self._backup_migration_unlocked(migration_backup_dir, original)
+            try:
+                written = self._write_unlocked(snapshot.config)
+                verified, pending = self._load_unlocked()
+                if pending or verified.config != snapshot.config:
+                    raise ConfigurationError("migrated configuration verification failed")
+                return ConfigPreparation(written, False, True, backup_path)
+            except Exception as error:
+                try:
+                    self._write_bytes_unlocked(original)
+                except Exception as rollback_error:
+                    raise ConfigurationError(
+                        f"configuration migration and rollback failed; backup: {backup_path}"
+                    ) from rollback_error
+                raise ConfigurationError(
+                    f"configuration migration failed and was rolled back; backup: {backup_path}"
+                ) from error
 
     def save(
         self,
@@ -112,6 +147,10 @@ class TomlProfileRepository:
 
     def _write_unlocked(self, config: ServerOpsConfig) -> ConfigSnapshot:
         content = encode_config(config).encode("utf-8")
+        self._write_bytes_unlocked(content)
+        return ConfigSnapshot(config, _content_hash(content))
+
+    def _write_bytes_unlocked(self, content: bytes) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         _secure_for_current_user(self.path.parent, directory=True)
         temporary = self.path.with_name(f".{self.path.name}.{uuid.uuid4().hex}.tmp")
@@ -127,7 +166,28 @@ class TomlProfileRepository:
             self._sync_directory()
         finally:
             temporary.unlink(missing_ok=True)
-        return ConfigSnapshot(config, _content_hash(content))
+
+    def _backup_migration_unlocked(self, directory: Path, content: bytes) -> Path:
+        directory.mkdir(parents=True, exist_ok=True)
+        _secure_for_current_user(directory, directory=True)
+        digest = _content_hash(content)
+        path = directory / f"config-{digest}.toml"
+        if path.exists():
+            if path.read_bytes() != content:
+                raise ConfigurationError(f"configuration migration backup collision: {path}")
+            return path
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            with os.fdopen(descriptor, "wb") as stream:
+                descriptor = -1
+                stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
+            _secure_for_current_user(path, directory=False)
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+        return path
 
     def _sync_directory(self) -> None:
         if os.name == "nt":

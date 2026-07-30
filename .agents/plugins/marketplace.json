@@ -1,7 +1,7 @@
 {
   "name": "serverops-codex",
   "interface": {
-    "displayName": "ServerOps Codex"
+    "displayName": "ServerOps"
   },
   "plugins": [
     {
@@ -14,7 +14,7 @@
         "installation": "AVAILABLE",
         "authentication": "ON_INSTALL"
       },
-      "category": "Developer Tools"
+      "category": "Productivity"
     }
   ]
 }

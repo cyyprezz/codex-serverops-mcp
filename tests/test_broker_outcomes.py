@@ -196,6 +196,46 @@ class BrokerOutcomeTests(unittest.TestCase):
         )
         self.assertLess(LONG_OPERATION_RESPONSE_TIMEOUT_SECONDS, 3_730)
 
+    def test_documented_maximum_timeout_reaches_worker_with_sufficient_deadline(self) -> None:
+        session_id = "sess-0123456789abcdef"
+        record = SessionRecord(
+            session_id,
+            "prod",
+            1234,
+            r"\\.\pipe\codex-serverops-worker-test",
+            "ready",
+            1.0,
+            2.0,
+        )
+
+        class Supervisor:
+            def get(self, _session_id: str) -> SessionRecord:
+                return record
+
+            def request(self, *args, **kwargs):
+                self.args = args
+                self.kwargs = kwargs
+                return {"status": "completed", "state": "ready"}
+
+        supervisor = Supervisor()
+        server = object.__new__(BrokerServer)
+        server.supervisor = supervisor  # type: ignore[assignment]
+        server._handle_request(  # noqa: SLF001 - broker dispatch contract
+            "session.exec",
+            {
+                "session_id": session_id,
+                "command": "printf done",
+                "timeout": 3_600,
+            },
+        )
+
+        self.assertEqual(supervisor.args[2]["timeout"], 3_600)
+        self.assertEqual(
+            supervisor.kwargs["timeout"],
+            WORKER_LONG_OPERATION_TIMEOUT_SECONDS,
+        )
+        self.assertGreater(WORKER_LONG_OPERATION_TIMEOUT_SECONDS, 3_600)
+
     def test_worker_disconnect_invalidates_session_and_preserves_unknown_code(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             supervisor = WorkerSupervisor(RuntimeDirectory(Path(temporary) / "runtime"))

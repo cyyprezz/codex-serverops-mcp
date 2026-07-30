@@ -101,7 +101,6 @@ def verify_release(
     *,
     tag: str | None = None,
     evidence_path: Path | None = None,
-    require_manual_evidence: bool = True,
 ) -> str:
     project = tomllib.loads((repo_root / "pyproject.toml").read_text(encoding="utf-8"))
     version = str(project["project"]["version"])
@@ -127,12 +126,21 @@ def verify_release(
         raise ReleaseContractError("Console command surface differs from the 0.1 contract")
     required_paths = (
         "README.md",
+        "CHANGELOG.md",
         "SECURITY.md",
+        "docs/artifact-plan.md",
         "docs/installation.md",
         "docs/getting-started.md",
+        "docs/manual-release-gates.md",
+        "docs/migration-rollback-evidence.md",
+        "docs/release-candidate-checklist.md",
+        "docs/release-checklist.md",
+        "docs/release-notes-0.1.1.md",
         "docs/security.md",
         "docs/tool-reference.md",
         "docs/troubleshooting.md",
+        "docs/windows-test-plan.md",
+        "scripts/artifact_checksums.py",
         ".github/workflows/ci.yml",
         ".github/workflows/release.yml",
     )
@@ -140,14 +148,69 @@ def verify_release(
     if missing:
         raise ReleaseContractError(f"Release documentation/workflows are missing: {missing}")
     _verify_workflow(repo_root / ".github" / "workflows" / "release.yml")
+    _verify_version_sync(repo_root, project, version)
     if tag is not None:
         if not STABLE_VERSION.fullmatch(version) or tag != f"v{version}":
             raise ReleaseContractError("Release tag must exactly match a stable package version")
-        _verify_server_json(repo_root, version)
-        if require_manual_evidence:
-            evidence = evidence_path or repo_root / "docs" / "release-evidence.json"
-            _verify_evidence(repo_root, evidence, version)
+        evidence = evidence_path or repo_root / "docs" / "release-evidence.json"
+        _verify_evidence(repo_root, evidence, version)
     return version
+
+
+def _verify_version_sync(
+    repo_root: Path,
+    project: dict[str, object],
+    version: str,
+) -> None:
+    _verify_server_json(repo_root, version)
+    lock = tomllib.loads((repo_root / "uv.lock").read_text(encoding="utf-8"))
+    local_packages = [
+        package
+        for package in lock.get("package", [])
+        if package.get("name") == project["project"]["name"]
+    ]
+    if len(local_packages) != 1 or local_packages[0].get("version") != version:
+        raise ReleaseContractError("uv.lock project version is not synchronized")
+
+    codex_root = repo_root / "plugins" / "codex-serverops-mcp"
+    claude_root = repo_root / "plugins" / "claude-serverops-mcp"
+    codex_manifest = json.loads(
+        (codex_root / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8")
+    )
+    codex_mcp = json.loads((codex_root / ".mcp.json").read_text(encoding="utf-8"))
+    claude_marketplace = json.loads(
+        (repo_root / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8")
+    )
+    claude_manifest = json.loads(
+        (claude_root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")
+    )
+    claude_mcp = json.loads((claude_root / ".mcp.json").read_text(encoding="utf-8"))
+    capabilities = json.loads(
+        (repo_root / "docs" / "capabilities.json").read_text(encoding="utf-8")
+    )
+    expected_args = ["--from", f"codex-serverops-mcp=={version}", "codex-serverops-mcp"]
+    claude_plugins = claude_marketplace.get("plugins")
+    synchronized = (
+        codex_manifest.get("version") == version
+        and codex_mcp.get("mcpServers", {}).get("serverops", {}).get("args")
+        == expected_args
+        and isinstance(claude_plugins, list)
+        and len(claude_plugins) == 1
+        and isinstance(claude_plugins[0], dict)
+        and claude_plugins[0].get("version") == version
+        and claude_manifest.get("version") == version
+        and claude_mcp.get("mcpServers", {}).get("serverops", {}).get("args")
+        == expected_args
+        and capabilities.get("published_version") == version
+    )
+    if not synchronized:
+        raise ReleaseContractError("package, plugin, marketplace, or capability versions differ")
+
+    for name in ("serverops-control", "serverops-diagnose"):
+        codex_skill = (codex_root / "skills" / name / "SKILL.md").read_bytes()
+        claude_skill = (claude_root / "skills" / name / "SKILL.md").read_bytes()
+        if codex_skill != claude_skill:
+            raise ReleaseContractError(f"client-neutral skill copies differ: {name}")
 
 
 def _verify_server_json(repo_root: Path, version: str) -> None:
@@ -280,17 +343,29 @@ def _verify_workflow(path: Path) -> None:
         "persist-credentials: false",
         "git merge-base --is-ancestor",
         "scripts/verify_release.py --tag",
-        "--automated-gates-only",
+        "--evidence docs/release-evidence.json",
+        "@anthropic-ai/claude-code@2.1.206 plugin validate",
+        "scripts/artifact_checksums.py create",
+        "scripts/artifact_checksums.py verify",
+        "plugins/codex-serverops-mcp/.mcp.json --repeat 2",
+        "plugins/claude-serverops-mcp/.mcp.json --repeat 2",
         "id-token: write",
         "pypa/gh-action-pypi-publish@",
         "attestations: true",
         "needs: publish-pypi",
         "gh release create",
+        "--notes-file docs/release-notes-0.1.1.md",
     )
     missing = [fragment for fragment in required if fragment not in workflow]
     if missing:
         raise ReleaseContractError(f"Release workflow safety contracts are missing: {missing}")
-    forbidden = ("workflow_dispatch:", "PYPI_TOKEN", "password:", "skip-existing")
+    forbidden = (
+        "workflow_dispatch:",
+        "PYPI_TOKEN",
+        "password:",
+        "skip-existing",
+        "--automated-gates-only",
+    )
     present = [fragment for fragment in forbidden if fragment in workflow]
     if present:
         raise ReleaseContractError(f"Release workflow has forbidden publishing config: {present}")
@@ -300,19 +375,10 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tag")
     parser.add_argument("--evidence", type=Path)
-    parser.add_argument(
-        "--automated-gates-only",
-        action="store_true",
-        help=(
-            "release with the automated contract only; manual external evidence remains "
-            "advisory"
-        ),
-    )
     args = parser.parse_args()
     version = verify_release(
         tag=args.tag,
         evidence_path=args.evidence,
-        require_manual_evidence=not args.automated_gates_only,
     )
     gate = "stable release" if args.tag else "development"
     print(f"{gate} contract OK for {version}")

@@ -1,6 +1,6 @@
 # MCP tool reference
 
-Version `0.1.0` exposes exactly eight public tools. This tool surface is the compatibility
+Version `0.1.1` exposes exactly eight public tools. This tool surface is the compatibility
 contract for the initial release.
 
 ## `server_profiles`

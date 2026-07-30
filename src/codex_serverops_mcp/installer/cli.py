@@ -30,7 +30,7 @@ from .setup import prepare_local_install, remove_local_data
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="serverops-install",
-        description="Prepare, configure and diagnose Codex ServerOps MCP on Windows.",
+        description="Prepare, configure and diagnose ServerOps on Windows.",
     )
     parser.add_argument("--version", action="version", version=PACKAGE_VERSION)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -42,9 +42,13 @@ def build_parser() -> argparse.ArgumentParser:
     setup.add_argument("--apply", action="store_true")
     setup.add_argument("--yes", action="store_true")
     check = commands.add_parser("check", help="Check local installation prerequisites.")
+    check.add_argument("--client", choices=("core", "codex", "claude", "all"), default="codex")
     check.add_argument("--json", action="store_true")
     doctor = commands.add_parser("doctor", help="Run local and optional remote diagnostics.")
     doctor.add_argument("--profile")
+    doctor.add_argument(
+        "--client", choices=("core", "codex", "claude", "all"), default="codex"
+    )
     doctor.add_argument("--json", action="store_true")
     codex = commands.add_parser(
         "codex-config",
@@ -88,12 +92,20 @@ def run(arguments: Sequence[str] | None = None) -> int:
                 print("Profile configuration was migrated atomically.")
             if args.broker_task:
                 _configure_broker_task(apply=args.apply, assume_yes=args.yes)
-            print("Codex config was not changed. Run: serverops-install codex-config")
+            print("AI client configuration was not changed.")
+            print("For direct Codex setup, run: serverops-install codex-config")
             return 0
         if args.command == "check":
-            return _report(LocalChecker(paths).run(include_broker=False), as_json=args.json)
+            prepare_local_install(paths)
+            return _report(
+                LocalChecker(paths).run(include_broker=False, client=args.client),
+                as_json=args.json,
+            )
         if args.command == "doctor":
-            return _report(Doctor(paths).run(args.profile), as_json=args.json)
+            prepare_local_install(paths)
+            return _report(
+                Doctor(paths).run(args.profile, client=args.client), as_json=args.json
+            )
         if args.command == "codex-config":
             _validate_confirmation_flags(args.apply, args.yes)
             change = plan_codex_config_change(
@@ -113,11 +125,19 @@ def run(arguments: Sequence[str] | None = None) -> int:
             return 0
         if args.command == "update":
             result = prepare_local_install(paths)
+            task_status = BrokerTaskController.connect().inspect_compatible(
+                production_broker_task_spec()
+            )
             print(f"Local state is compatible with package {PACKAGE_VERSION}.")
             if result["config_migrated"]:
                 print("Profile configuration was migrated atomically.")
-            print("Codex config was not changed; preview a new exact pin with codex-config.")
-            return _report(LocalChecker(paths).run(include_broker=False), as_json=False)
+            if task_status.exists:
+                print("Managed broker task is pinned to this package version.")
+            print("AI client configuration was not changed.")
+            return _report(
+                LocalChecker(paths).run(include_broker=False, client="core"),
+                as_json=False,
+            )
         if args.command == "uninstall":
             _validate_confirmation_flags(args.apply, args.yes)
             change = plan_codex_config_change(

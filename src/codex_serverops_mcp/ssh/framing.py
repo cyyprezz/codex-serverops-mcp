@@ -49,11 +49,13 @@ def command_wrapper(
     begin = f"__SERVEROPS_BEGIN_{token}__"
     body = command.rstrip("\r\n") or ":"
     return (
+        "{\n"
         "builtin command -p stty -echo intr '^]' >/dev/null 2>&1\n"
         f"builtin printf '\\n{begin}\\n'; {{\n"
         f"{body}\n"
         "}; _serverops_exit=$?\n"
         f"{_completion_wrapper(token, shell_nonce, '$_serverops_exit')}"
+        "}\n"
     )
 
 

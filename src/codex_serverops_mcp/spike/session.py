@@ -10,6 +10,7 @@ from codex_serverops_mcp.ssh.framing import (
     ANSI_ESCAPE,
     CommandFrameParser,
     CommandResult,
+    FrameProtocolError,
     command_wrapper,
     interrupt_recovery_wrapper,
     new_token,
@@ -81,7 +82,13 @@ class SshSpikeSession:
             self._read_and_handle_prompts(prompt_provider, min(0.25, deadline - monotonic()))
             if READY_PROMPT.search(_plain(self._history)):
                 self._ready = True
-                self.terminal.write(b"stty -echo intr '^]'; export PS1=''\r\n")
+                self.terminal.write(
+                    b"stty -echo intr '^]'; "
+                    b"builtin unset PROMPT_COMMAND PS0; "
+                    b"builtin export PS1='' PS2='' PS3='' PS4=''; "
+                    b"builtin readonly PROMPT_COMMAND='' PS0='' "
+                    b"PS1='' PS2='' PS3='' PS4=''\r\n"
+                )
                 self._drain_for(0.2, prompt_provider)
                 return
             if not self.terminal.running:
@@ -118,7 +125,12 @@ class SshSpikeSession:
                     if result is not None:
                         return result
                 if not self.terminal.running:
-                    final = parser.feed(b"", final=True)
+                    try:
+                        final = parser.feed(b"", final=True)
+                    except FrameProtocolError as error:
+                        raise OutcomeUnknown(
+                            "The connection ended before command completion could be verified."
+                        ) from error
                     if final is not None:
                         return final
                     raise OutcomeUnknown(
@@ -191,7 +203,11 @@ class SshSpikeSession:
             if kind == "password" and SUDO_PROMPT.search(match.group(0)):
                 continue
             response = prompt_provider(kind, match.group(0))
-            newline = "\r" if self.terminal.backend_name == "winpty" else "\r\n"
+            newline = (
+                "\r"
+                if kind == "sudo_password" or self.terminal.backend_name == "winpty"
+                else "\r\n"
+            )
             self.terminal.write((response + newline).encode("utf-8"))
             self._prompt_offsets[kind] = match.end()
             if kind == "sudo_password":

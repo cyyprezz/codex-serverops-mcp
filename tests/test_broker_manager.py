@@ -26,19 +26,25 @@ class BrokerManagerTests(unittest.TestCase):
         from codex_serverops_mcp.broker.manager import BrokerManager
 
         with tempfile.TemporaryDirectory() as temporary:
-            manager = BrokerManager(Path(temporary) / "runtime")
-            try:
-                with manager.connect() as first:
-                    first_pid = first.request("broker.ping")["pid"]
-                with manager.connect() as second:
-                    self.assertEqual(second.request("broker.ping")["pid"], first_pid)
-                    second.request("broker.shutdown")
-                manager.wait_for_launched_broker()
-            finally:
-                process = manager._launched_process
-                if process is not None and process.poll() is None:
-                    process.terminate()
-                    process.wait(timeout=5)
+            root = Path(temporary)
+            environment = {
+                "LOCALAPPDATA": str(root / "local"),
+                "USERPROFILE": str(root / "user"),
+            }
+            with patch.dict(os.environ, environment):
+                manager = BrokerManager(root / "runtime")
+                try:
+                    with manager.connect() as first:
+                        first_pid = first.request("broker.ping")["pid"]
+                    with manager.connect() as second:
+                        self.assertEqual(second.request("broker.ping")["pid"], first_pid)
+                        second.request("broker.shutdown")
+                    manager.wait_for_launched_broker()
+                finally:
+                    process = manager._launched_process
+                    if process is not None and process.poll() is None:
+                        process.terminate()
+                        process.wait(timeout=5)
 
 
 if __name__ == "__main__":

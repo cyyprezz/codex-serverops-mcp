@@ -9,6 +9,7 @@ from pathlib import Path
 
 from .client import BrokerClient
 from .errors import BrokerUnavailable
+from .task_model import production_broker_task_spec
 from .task_scheduler import BrokerTaskController, BrokerTaskError, BrokerTaskUnavailable
 
 
@@ -19,6 +20,7 @@ class BrokerManager:
         self._launched_process: subprocess.Popen[bytes] | None = None
 
     def connect(self) -> BrokerClient:
+        self._validate_installed_task()
         try:
             return BrokerClient(self.runtime_path)
         except BrokerUnavailable:
@@ -66,7 +68,9 @@ class BrokerManager:
             return
         if self.runtime_path is None:
             try:
-                if BrokerTaskController.connect().start_if_installed():
+                if BrokerTaskController.connect().start_if_installed(
+                    expected=production_broker_task_spec()
+                ):
                     return
             except BrokerTaskUnavailable:
                 pass
@@ -89,3 +93,15 @@ class BrokerManager:
             stderr=subprocess.DEVNULL,
             creationflags=creationflags,
         )
+
+    def _validate_installed_task(self) -> None:
+        if self.runtime_path is not None:
+            return
+        try:
+            BrokerTaskController.connect().inspect_compatible(
+                production_broker_task_spec()
+            )
+        except BrokerTaskUnavailable:
+            return
+        except BrokerTaskError as error:
+            raise BrokerUnavailable(str(error)) from error

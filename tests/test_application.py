@@ -158,6 +158,22 @@ class ApplicationServicesTests(unittest.TestCase):
             ),
         )
 
+    def test_documented_maximum_timeout_reaches_the_broker_unchanged(self) -> None:
+        session_id = "sess-0123456789abcdef"
+
+        self.services.server_exec(session_id, "printf done", timeout=3_600)
+        self.services.server_elevation(
+            "exec",
+            session_id,
+            command="id -u",
+            timeout=3_600,
+        )
+
+        self.assertEqual(self.broker.client.requests[0][1]["timeout"], 3_600.0)
+        self.assertEqual(self.broker.client.requests[1][1]["timeout"], 3_600.0)
+        with self.assertRaisesRegex(ValueError, "3600"):
+            self.services.server_exec(session_id, "printf too-long", timeout=3_600.1)
+
     def test_structured_file_calls_keep_read_and_write_protocols_separate(self) -> None:
         session_id = "sess-0123456789abcdef"
 

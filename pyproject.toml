@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "codex-serverops-mcp"
-version = "0.1.0"
-description = "Windows-first local MCP transport for stateful SSH server operations"
+version = "0.1.1"
+description = "Operate chosen Linux servers from Codex or Claude Code with stateful SSH sessions"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 license = "MIT"
@@ -58,7 +58,11 @@ include = [
   "/src",
   "/tests",
   "/LICENSE",
+  "/AGENTS.md",
+  "/CHANGELOG.md",
+  "/CONTRIBUTING.md",
   "/README.md",
+  "/ROADMAP.md",
   "/SECURITY.md",
   "/server.json",
   "/pyproject.toml",
@@ -66,7 +70,6 @@ include = [
 ]
 exclude = [
   "/docs/manual-*-checklist.md",
-  "/docs/release-checklist.md",
   "/docs/spike-results.md",
   "/docs/test-reports",
 ]

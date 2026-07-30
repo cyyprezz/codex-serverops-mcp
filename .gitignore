@@ -1,10 +1,12 @@
 .venv/
 .uv-cache/
 .ruff_cache/
+.tmp/
 __pycache__/
 *.py[cod]
 build/
 dist/
+spike/windows-packaging/out/
 *.egg-info/
 .spike-runtime/
 .product-smoke-runtime/
@@ -15,6 +17,5 @@ dist/
 
 # Local-only development and release evidence
 docs/manual-*-checklist.md
-docs/release-checklist.md
 docs/spike-results.md
 docs/test-reports/

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 from codex_serverops_mcp.config import ElevationMode
+from codex_serverops_mcp.installer.checks import LocalChecker
 from codex_serverops_mcp.installer.doctor import REQUIRED_REMOTE_COMMANDS, Doctor
 
 
@@ -33,6 +35,15 @@ class FakeDoctorServices:
 
 
 class DoctorChecksTests(unittest.TestCase):
+    def test_claude_check_uses_only_documented_cli_discovery(self) -> None:
+        with patch(
+            "codex_serverops_mcp.installer.checks.shutil.which",
+            return_value=r"C:\Tools\claude.exe",
+        ):
+            result = LocalChecker._claude_code()
+        self.assertEqual(result.code, "claude_code")
+        self.assertEqual(result.level.value, "pass")
+
     def test_remote_command_check_reports_exact_missing_tools(self) -> None:
         services = FakeDoctorServices(missing=("realpath", "sha256sum"))
         checks = Doctor._bash_and_commands(services, "sess")  # type: ignore[arg-type]

@@ -9,6 +9,7 @@ from unittest.mock import Mock, patch
 
 import pywintypes
 
+from codex_serverops_mcp import PACKAGE_VERSION
 from codex_serverops_mcp.broker.manager import BrokerManager
 from codex_serverops_mcp.broker.task_model import (
     MANAGED_TASK_MARKER,
@@ -212,6 +213,16 @@ class BrokerTaskTests(unittest.TestCase):
         self.assertTrue(self.controller.remove())
         self.assertFalse(self.controller.inspect().exists)
 
+    def test_refuses_to_start_a_managed_task_pinned_to_an_old_package(self) -> None:
+        old = production_broker_task_spec(version="0.1.0", uvx_path=sys.executable)
+        self.controller.register(old)
+
+        with self.assertRaisesRegex(BrokerTaskError, "different ServerOps runtime"):
+            self.controller.start_if_installed(expected_version=PACKAGE_VERSION)
+
+        task = self.service.root.tasks[self.controller.task_name]
+        self.assertEqual(task.run_count, 0)
+
     def test_task_scheduler_account_normalization_is_verified_by_sid(self) -> None:
         with (
             patch(
@@ -302,7 +313,9 @@ class BrokerTaskTests(unittest.TestCase):
             manager = BrokerManager()
             manager._start_broker()
 
-        task.start_if_installed.assert_called_once_with()
+        task.start_if_installed.assert_called_once_with(
+            expected=production_broker_task_spec()
+        )
         self.assertIsNone(manager._launched_process)
 
 

@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "product": "ServerOps",
+  "package": "codex-serverops-mcp",
+  "published_version": "0.1.1",
+  "marketplaces": {
+    "codex": "serverops-codex",
+    "claude": "serverops-claude"
+  },
+  "tools": [
+    "server_profile_setup",
+    "server_profiles",
+    "server_connection",
+    "server_exec",
+    "server_terminal",
+    "server_files",
+    "server_file_edit",
+    "server_elevation"
+  ],
+  "available": [
+    {
+      "id": "profiles",
+      "label": "Explicit profiles and visible local profile assistant",
+      "evidence": ["src/codex_serverops_mcp/setup/service.py", "tests/test_setup_contract.py"]
+    },
+    {
+      "id": "broker_sessions",
+      "label": "Broker-owned stateful Bash sessions",
+      "evidence": ["src/codex_serverops_mcp/broker/supervisor.py", "tests/test_worker_session.py"]
+    },
+    {
+      "id": "mcp_restart_rediscovery",
+      "label": "MCP-restart rediscovery with the optional managed broker task while processes remain alive",
+      "evidence": ["docs/adr/014-task-scheduler-broker-lifetime.md", "tests/test_mcp_restart_check.py"]
+    },
+    {
+      "id": "unknown_outcomes",
+      "label": "Explicit unknown outcomes without automatic retry",
+      "evidence": ["src/codex_serverops_mcp/broker/outcomes.py", "tests/test_broker_outcomes.py"]
+    },
+    {
+      "id": "structured_files",
+      "label": "Bounded structured UTF-8 text operations with optional SHA-256 preconditions",
+      "evidence": ["src/codex_serverops_mcp/files/service.py", "tests/test_files_service.py"]
+    },
+    {
+      "id": "visible_auth",
+      "label": "Visible local OpenSSH and guided sudo authentication",
+      "evidence": ["src/codex_serverops_mcp/worker/visible_auth.py", "tests/test_visible_auth_coordinator.py"]
+    },
+    {
+      "id": "local_audit",
+      "label": "Redacted local JSONL audit events",
+      "evidence": ["src/codex_serverops_mcp/security/audit.py", "tests/test_audit.py"]
+    },
+    {
+      "id": "shared_core",
+      "label": "Shared eight-tool core for Codex and Claude Code",
+      "evidence": ["src/codex_serverops_mcp/server.py", "tests/test_plugin_distribution.py"]
+    },
+    {
+      "id": "no_remote_agent",
+      "label": "No ServerOps agent installed on the Linux server",
+      "evidence": ["src/codex_serverops_mcp/ssh/invocation.py", "docs/architecture.md"]
+    },
+    {
+      "id": "automatic_bootstrap",
+      "label": "Automatic idempotent local bootstrap",
+      "evidence": ["src/codex_serverops_mcp/bootstrap/service.py", "tests/test_bootstrap.py"]
+    },
+    {
+      "id": "claude_plugin",
+      "label": "Claude Code GitHub marketplace and plugin",
+      "evidence": [".claude-plugin/marketplace.json", "tests/test_plugin_distribution.py"]
+    }
+  ],
+  "candidate": [],
+  "planned": [
+    {"id": "windows_exe", "label": "ServerOpsSetup.exe and self-contained runtime", "target": "0.1.2"},
+    {"id": "persistent_jobs", "label": "Persistent background jobs", "target": "0.2"},
+    {"id": "eventlog", "label": "Append-only operation eventlog", "target": "0.2"},
+    {"id": "log_engine", "label": "Persistent log engine", "target": "0.2"},
+    {"id": "binary_resume_transfers", "label": "Binary and resumable transfers", "target": "0.2"},
+    {"id": "incident_system", "label": "Persistent investigations and incident timelines", "target": "0.3"},
+    {"id": "fleet_rollouts", "label": "Transactional changes and fleet rollouts", "target": "0.4"},
+    {"id": "transactional_changes", "label": "Transactional change sets", "target": "0.4"},
+    {"id": "backup_assurance", "label": "Backup assurance", "target": "0.5"},
+    {"id": "native_database_adapters", "label": "Native database adapters", "target": "0.5"}
+  ]
+}

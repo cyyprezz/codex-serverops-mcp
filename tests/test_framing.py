@@ -66,6 +66,14 @@ class CommandFrameParserTests(unittest.TestCase):
         self.assertIn("builtin pwd", wrapper)
         self.assertNotIn("\nprintf '", wrapper)
 
+    def test_wrapper_parses_completion_before_an_stdin_reading_body_runs(self) -> None:
+        wrapper = command_wrapper("read -r secret", "ABC123", shell_nonce=SHELL_NONCE)
+
+        self.assertTrue(wrapper.startswith("{\n"))
+        self.assertTrue(wrapper.endswith("fi\n}\n"))
+        self.assertEqual(wrapper.count("\n}\n"), 1)
+        self.assertLess(wrapper.index("read -r secret"), wrapper.index("_serverops_exit=$?"))
+
     def test_wrapper_closes_a_multiline_command_without_a_leading_semicolon(self) -> None:
         wrapper = command_wrapper(
             "(\nprintf ok\n)\n",

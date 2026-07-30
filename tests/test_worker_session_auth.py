@@ -201,7 +201,7 @@ class StatefulSshSessionAuthenticationTests(unittest.TestCase):
         )
 
         self.assertEqual(authenticator.kinds, [PromptKind.SUDO_PASSWORD])
-        self.assertIn(b"fixture-password\r\n", terminal.writes)
+        self.assertIn(b"fixture-password\r", terminal.writes)
         self.assertEqual(session.state.state, SessionState.READY)
         session.close()
 

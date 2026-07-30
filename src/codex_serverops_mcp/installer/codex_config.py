@@ -95,7 +95,12 @@ def plan_codex_config_change(
                 "an unmarked [mcp_servers.serverops] entry exists and was not changed"
             )
         if remove:
-            raise InstallerError("no installer-managed Codex configuration block exists")
+            return CodexConfigChange(
+                previous_exists,
+                previous,
+                previous,
+                "No installer-managed Codex configuration block exists; no change is needed.",
+            )
         block = managed_block(
             distribution_version,
             development_wheel=development_wheel,
@@ -125,6 +130,8 @@ def plan_codex_config_change(
 
 def apply_codex_config_change(path: Path, change: CodexConfigChange) -> None:
     _assert_current(path, change)
+    if change.updated == change.previous:
+        return
     path.parent.mkdir(parents=True, exist_ok=True)
     backup = path.with_name(path.name + ".codex-serverops-mcp.backup")
     backup_stage = path.with_name(f".{path.name}.backup-{uuid4().hex}")

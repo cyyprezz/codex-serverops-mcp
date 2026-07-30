@@ -6,12 +6,12 @@ scaffolding; production modules must not import from `codex_serverops_mcp.spike`
 ## Process topology
 
 ```text
-Codex
+Codex or Claude Code
   -> FastMCP STDIO process
       -> visible local setup process (profile changes only)
       -> local broker client
-          -> current-user Task Scheduler task
-              -> one per-user broker process
+          -> one per-user broker process
+              -> optional current-user Task Scheduler ownership for reliable MCP-restart lifetime
               -> one session-worker process per SSH session
                   -> Windows OpenSSH in ConPTY
                       -> existing serverops-auth entry point in Askpass mode
@@ -26,8 +26,9 @@ passwords or passphrases. A worker owns one OpenSSH process for its complete lif
 The secured broker/worker lifecycle, MCP session-rediscovery path, direct visible-auth coordinator,
 profile-driven product SSH session, separate setup process, structured-file service and guided
 elevation service are implemented. Local audit, installer and Doctor are also implemented. The
-current FastMCP surface exposes the complete eight-tool product contract. Distribution and manual
-release gates remain before the package is labelled `0.1.0`.
+current FastMCP surface exposes the complete eight-tool product contract. Version `0.1.0` was the
+first public release. Version `0.1.1` adds the synchronized Codex/Claude distribution and local
+bootstrap while retaining the same tool, protocol, config, and unknown-outcome contracts.
 
 ## Package boundaries
 
@@ -46,6 +47,7 @@ files/       Structured remote path and file operations
 elevation/   Guided sudo lifecycle and framed elevated command execution
 security/    Policy, redaction and audit primitives
 installer/   Installation, broker-task, doctor and Codex configuration transactions
+bootstrap/   Idempotent preparation and migration of allowlisted ServerOps-owned local state
 ```
 
 The dependency direction is inward toward smaller primitives:

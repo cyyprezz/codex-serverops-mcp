@@ -40,9 +40,9 @@ class Doctor:
     paths: InstallPaths
     broker: BrokerManager | None = None
 
-    def run(self, profile_name: str | None = None) -> CheckReport:
+    def run(self, profile_name: str | None = None, *, client: str = "codex") -> CheckReport:
         manager = self.broker or BrokerManager(self.paths.runtime_dir)
-        local = LocalChecker(self.paths, manager).run(include_broker=True)
+        local = LocalChecker(self.paths, manager).run(include_broker=True, client=client)
         checks = list(local.checks)
         if profile_name is None:
             checks.append(

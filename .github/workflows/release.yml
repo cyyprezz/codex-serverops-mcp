@@ -42,10 +42,16 @@ jobs:
         run: |
           uv sync --locked --all-groups --python 3.12
           $env:PYTHONPATH = "src"
-          python scripts/verify_release.py --tag $env:GITHUB_REF_NAME --automated-gates-only
+          python scripts/verify_release.py --tag $env:GITHUB_REF_NAME --evidence docs/release-evidence.json
           python -m unittest discover -s tests -v
           ruff check .
           uv build
+
+      - name: Validate Claude Code marketplace and plugin
+        shell: pwsh
+        run: |
+          npx.cmd --yes @anthropic-ai/claude-code@2.1.206 plugin validate . --strict
+          npx.cmd --yes @anthropic-ai/claude-code@2.1.206 plugin validate ./plugins/claude-serverops-mcp --strict
 
       - name: Verify distributions and checkout-free commands
         shell: pwsh
@@ -66,6 +72,12 @@ jobs:
           python scripts/stdio_surface_smoke.py $wheel.FullName --cache-dir $smokeCache
           uvx --offline --cache-dir $smokeCache --from $wheel.FullName serverops-install --version
           python scripts/stdio_surface_smoke.py $wheel.FullName --offline --cache-dir $smokeCache
+          python scripts/stdio_surface_smoke.py $wheel.FullName --offline --cache-dir $smokeCache --manifest plugins/codex-serverops-mcp/.mcp.json --repeat 2
+          python scripts/stdio_surface_smoke.py $wheel.FullName --offline --cache-dir $smokeCache --manifest plugins/claude-serverops-mcp/.mcp.json --repeat 2
+
+          New-Item -ItemType Directory -Force -Path checksums | Out-Null
+          python scripts/artifact_checksums.py create checksums/SHA256SUMS.txt $wheel.FullName $sdist.FullName
+          python scripts/artifact_checksums.py verify checksums/SHA256SUMS.txt dist
 
       - name: Store verified release distributions
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -74,6 +86,14 @@ jobs:
           path: |
             dist/*.whl
             dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Store release checksums
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-checksums
+          path: checksums/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 7
 
@@ -107,18 +127,29 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Check out tagged release notes
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
       - name: Download published distributions
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: python-distributions
           path: dist
 
+      - name: Download verified checksums
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-checksums
+          path: checksums
+
       - name: Create release from the published tag
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/*.whl dist/*.tar.gz \
+          gh release create "$GITHUB_REF_NAME" dist/*.whl dist/*.tar.gz checksums/SHA256SUMS.txt \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
-            --generate-notes \
-            --title "Codex ServerOps MCP $GITHUB_REF_NAME"
+            --notes-file docs/release-notes-0.1.1.md \
+            --title "ServerOps $GITHUB_REF_NAME"
